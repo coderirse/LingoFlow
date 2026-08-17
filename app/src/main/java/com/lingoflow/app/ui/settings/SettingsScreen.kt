@@ -47,6 +47,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.lingoflow.app.domain.model.llm.LlmProviderId
+import com.lingoflow.app.domain.model.settings.AppLanguage
+import com.lingoflow.app.domain.model.settings.ThemeMode
+import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.theme.LingoFlowTheme
@@ -69,13 +72,16 @@ fun SettingsScreen(
     onSaveClick: () -> Unit,
     onSaveSuccessConsumed: () -> Unit,
     onCheckUpdates: () -> Unit,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onAppLanguageChange: (AppLanguage) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalStrings.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.saveSuccess) {
         if (uiState.saveSuccess) {
-            snackbarHostState.showSnackbar("Settings saved")
+            snackbarHostState.showSnackbar(strings.settingsSaved)
             onSaveSuccessConsumed()
         }
     }
@@ -87,12 +93,12 @@ fun SettingsScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(strings.settings) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = strings.back
                         )
                     }
                 }
@@ -112,7 +118,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                SettingsSection(title = "LLM Provider") {
+                SettingsSection(title = strings.llmProvider) {
                     ProviderDropdown(
                         selected = activeProviderId,
                         onSelected = onProviderChange
@@ -120,13 +126,13 @@ fun SettingsScreen(
                     SecretTextField(
                         value = activeConfig?.apiKey ?: "",
                         onValueChange = onApiKeyChange,
-                        label = "API Key"
+                        label = strings.apiKey
                     )
                     OutlinedTextField(
                         value = activeConfig?.baseUrl ?: "",
                         onValueChange = onBaseUrlChange,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Base URL") },
+                        label = { Text(strings.baseUrl) },
                         placeholder = { Text(activeProviderId.defaultBaseUrl) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
@@ -135,7 +141,7 @@ fun SettingsScreen(
                         value = activeConfig?.model ?: "",
                         onValueChange = onModelChange,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Model") },
+                        label = { Text(strings.model) },
                         placeholder = { Text(activeProviderId.defaultModel) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
@@ -148,17 +154,17 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Dictionary") {
+                SettingsSection(title = strings.dictionarySection) {
                     SecretTextField(
                         value = uiState.settings.dictionaryApiKey,
                         onValueChange = onDictionaryApiKeyChange,
-                        label = "Merriam-Webster API Key"
+                        label = strings.mwApiKey
                     )
                 }
             }
 
             item {
-                SettingsSection(title = "Translation") {
+                SettingsSection(title = strings.translationSection) {
                     TranslationModeSelector(
                         selected = uiState.settings.defaultTranslationMode,
                         onSelected = onDefaultModeChange
@@ -167,9 +173,22 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsSection(title = "About") {
+                SettingsSection(title = strings.appearance) {
+                    ThemeModeDropdown(
+                        selected = uiState.settings.themeMode,
+                        onSelected = onThemeModeChange
+                    )
+                    AppLanguageDropdown(
+                        selected = uiState.settings.appLanguage,
+                        onSelected = onAppLanguageChange
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = strings.about) {
                     Text(
-                        text = "Current version: ${com.lingoflow.app.BuildConfig.VERSION_NAME}",
+                        text = strings.currentVersion + com.lingoflow.app.BuildConfig.VERSION_NAME,
                         style = MaterialTheme.typography.bodyMedium
                     )
                     UpdateCheckRow(
@@ -188,7 +207,7 @@ fun SettingsScreen(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
                 ) {
                     Text(
-                        text = "Save Settings",
+                        text = strings.saveSettings,
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
@@ -226,6 +245,7 @@ private fun UpdateCheckRow(
     updateCheck: UpdateCheckState,
     onCheckUpdates: () -> Unit
 ) {
+    val strings = LocalStrings.current
     val context = LocalContext.current
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -236,23 +256,23 @@ private fun UpdateCheckRow(
         ) {
             Text(
                 if (updateCheck == UpdateCheckState.Checking) {
-                    "Checking..."
+                    strings.checking
                 } else {
-                    "Check for Updates"
+                    strings.checkForUpdates
                 }
             )
         }
 
         when (updateCheck) {
             is UpdateCheckState.UpToDate -> Text(
-                text = "You're on the latest version.",
+                text = strings.upToDate,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             is UpdateCheckState.Available -> {
                 Text(
-                    text = "New version available: ${updateCheck.release.tagName}",
+                    text = strings.newVersionAvailable(updateCheck.release.tagName),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -265,12 +285,12 @@ private fun UpdateCheckRow(
                         )
                     }
                 ) {
-                    Text("Download ${updateCheck.release.tagName}")
+                    Text(strings.downloadVersion(updateCheck.release.tagName))
                 }
             }
 
             is UpdateCheckState.Failed -> Text(
-                text = "Update check failed. Please try again later.",
+                text = strings.updateFailed,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )
@@ -286,6 +306,7 @@ private fun ProviderDropdown(
     selected: LlmProviderId,
     onSelected: (LlmProviderId) -> Unit
 ) {
+    val strings = LocalStrings.current
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
@@ -299,7 +320,7 @@ private fun ProviderDropdown(
                 .fillMaxWidth()
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
             readOnly = true,
-            label = { Text("Provider") },
+            label = { Text(strings.provider) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
         )
         ExposedDropdownMenu(
@@ -325,6 +346,7 @@ private fun SecretTextField(
     onValueChange: (String) -> Unit,
     label: String
 ) {
+    val strings = LocalStrings.current
     var passwordVisible by remember { mutableStateOf(false) }
 
     OutlinedTextField(
@@ -341,7 +363,7 @@ private fun SecretTextField(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         trailingIcon = {
             TextButton(onClick = { passwordVisible = !passwordVisible }) {
-                Text(if (passwordVisible) "Hide" else "Show")
+                Text(if (passwordVisible) strings.hide else strings.show)
             }
         }
     )
@@ -352,13 +374,14 @@ private fun TemperatureRow(
     temperature: Float,
     onTemperatureChange: (Float) -> Unit
 ) {
+    val strings = LocalStrings.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Temperature",
+            text = strings.temperature,
             style = MaterialTheme.typography.bodyMedium
         )
         Slider(
@@ -384,6 +407,7 @@ private fun TranslationModeSelector(
     selected: TranslationMode,
     onSelected: (TranslationMode) -> Unit
 ) {
+    val strings = LocalStrings.current
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
@@ -394,7 +418,7 @@ private fun TranslationModeSelector(
             value = selected.displayName,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Default Translation Mode") },
+            label = { Text(strings.defaultMode) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
@@ -409,6 +433,97 @@ private fun TranslationModeSelector(
                     text = { Text(mode.displayName) },
                     onClick = {
                         onSelected(mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeModeDropdown(
+    selected: ThemeMode,
+    onSelected: (ThemeMode) -> Unit
+) {
+    val strings = LocalStrings.current
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (selected) {
+        ThemeMode.SYSTEM -> strings.themeSystem
+        ThemeMode.LIGHT -> strings.themeLight
+        ThemeMode.DARK -> strings.themeDark
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(strings.theme) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            ThemeMode.entries.forEach { mode ->
+                val text = when (mode) {
+                    ThemeMode.SYSTEM -> strings.themeSystem
+                    ThemeMode.LIGHT -> strings.themeLight
+                    ThemeMode.DARK -> strings.themeDark
+                }
+                DropdownMenuItem(
+                    text = { Text(text) },
+                    onClick = {
+                        onSelected(mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppLanguageDropdown(
+    selected: AppLanguage,
+    onSelected: (AppLanguage) -> Unit
+) {
+    val strings = LocalStrings.current
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = selected.displayName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(strings.language) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            AppLanguage.entries.forEach { language ->
+                DropdownMenuItem(
+                    text = { Text(language.displayName) },
+                    onClick = {
+                        onSelected(language)
                         expanded = false
                     }
                 )
@@ -442,7 +557,9 @@ private fun SettingsScreenPreview() {
             onDefaultModeChange = {},
             onSaveClick = {},
             onSaveSuccessConsumed = {},
-            onCheckUpdates = {}
+            onCheckUpdates = {},
+            onThemeModeChange = {},
+            onAppLanguageChange = {}
         )
     }
 }

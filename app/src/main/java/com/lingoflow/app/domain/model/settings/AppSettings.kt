@@ -8,5 +8,7 @@ data class AppSettings(
     val activeLlmProviderId: LlmProviderId,
     val llmProviders: Map<LlmProviderId, ProviderConfig>,
     val dictionaryApiKey: String,
-    val defaultTranslationMode: TranslationMode = TranslationMode.STANDARD
+    val defaultTranslationMode: TranslationMode = TranslationMode.STANDARD,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val appLanguage: AppLanguage = AppLanguage.ENGLISH
 )

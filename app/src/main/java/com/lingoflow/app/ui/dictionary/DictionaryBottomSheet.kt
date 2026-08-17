@@ -42,6 +42,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
+import com.lingoflow.app.ui.i18n.LocalStrings
 
 /**
  * Full dictionary lookup presented as a bottom sheet. Owns its own
@@ -58,6 +59,7 @@ fun DictionaryBottomSheet(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val strings = LocalStrings.current
     var query by remember { mutableStateOf(initialWord) }
 
     LaunchedEffect(initialWord) {
@@ -84,14 +86,14 @@ fun DictionaryBottomSheet(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("English word...") },
+                    placeholder = { Text(strings.englishWordHint) },
                     singleLine = true,
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
-                                    contentDescription = "Clear"
+                                    contentDescription = strings.clear
                                 )
                             }
                         }
@@ -101,14 +103,14 @@ fun DictionaryBottomSheet(
                     onClick = { viewModel.lookUp(query) },
                     enabled = query.isNotBlank() && uiState !is DictionaryUiState.Loading
                 ) {
-                    Text("Look Up")
+                    Text(strings.lookUp)
                 }
             }
 
             when (val state = uiState) {
                 DictionaryUiState.Idle -> {
                     Text(
-                        text = "Enter a word to look it up.",
+                        text = strings.enterWordToLookup,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 16.dp)
@@ -162,6 +164,7 @@ private fun DictionaryEntryContent(
     onToggleFavorite: () -> Unit,
     onSpeak: () -> Unit
 ) {
+    val strings = LocalStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -181,9 +184,9 @@ private fun DictionaryEntryContent(
                         Icons.Default.FavoriteBorder
                     },
                     contentDescription = if (isFavorite) {
-                        "Remove from favorites"
+                        strings.removeFromFavorites
                     } else {
-                        "Add to favorites"
+                        strings.addToFavorites
                     },
                     tint = if (isFavorite) {
                         Color(0xFF00BCD4)
@@ -204,7 +207,7 @@ private fun DictionaryEntryContent(
                 IconButton(onClick = onSpeak, enabled = ttsReady) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play pronunciation"
+                        contentDescription = strings.playPronunciation
                     )
                 }
             }
@@ -265,7 +268,7 @@ private fun DictionaryEntryContent(
         if (entry.phrases.isNotEmpty()) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             Text(
-                text = "Phrasal verbs",
+                text = strings.phrasalVerbs,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -290,7 +293,7 @@ private fun DictionaryEntryContent(
             if (etymology.isNotBlank()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 Text(
-                    text = "Etymology",
+                    text = strings.etymology,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -309,6 +312,7 @@ private fun DictionaryErrorContent(
     error: DictionaryException,
     onGoToSettings: () -> Unit
 ) {
+    val strings = LocalStrings.current
     Column(
         modifier = Modifier.padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -316,20 +320,22 @@ private fun DictionaryErrorContent(
         when (error) {
             is DictionaryException.NoApiKey -> {
                 Text(
-                    text = "Please set your Merriam-Webster API key in Settings.",
+                    text = strings.noApiKey,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
                 TextButton(onClick = onGoToSettings) {
-                    Text("Go to Settings")
+                    Text(strings.goToSettings)
                 }
             }
 
             is DictionaryException.NotFound -> {
                 val message = if (error.suggestions.isEmpty()) {
-                    "Word not found."
+                    strings.noResults
                 } else {
-                    "Word not found. Did you mean: ${error.suggestions.joinToString(", ")}?"
+                    strings.wordNotFoundWithSuggestions(
+                        error.suggestions.joinToString(", ")
+                    )
                 }
                 Text(
                     text = message,
@@ -340,7 +346,7 @@ private fun DictionaryErrorContent(
 
             is DictionaryException.InvalidApiKey -> {
                 Text(
-                    text = "Invalid API key. Please check your Settings.",
+                    text = strings.invalidApiKey,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -348,7 +354,7 @@ private fun DictionaryErrorContent(
 
             is DictionaryException.Network -> {
                 Text(
-                    text = "Network error. Please check your connection.",
+                    text = strings.networkError,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -356,7 +362,7 @@ private fun DictionaryErrorContent(
 
             is DictionaryException.ParseError -> {
                 Text(
-                    text = "Something went wrong. Please try again.",
+                    text = strings.networkError,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )

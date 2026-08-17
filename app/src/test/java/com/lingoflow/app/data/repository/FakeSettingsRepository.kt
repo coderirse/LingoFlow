@@ -5,6 +5,8 @@ import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.repository.SettingsRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** In-memory [SettingsRepository] for ViewModel tests. */
 class FakeSettingsRepository(
@@ -26,12 +28,14 @@ class FakeSettingsRepository(
     var savedSettings: AppSettings? = null
         private set
 
-    private var current: AppSettings = initial
+    private val current = MutableStateFlow(initial)
 
-    override suspend fun getSettings(): AppSettings = current
+    override suspend fun getSettings(): AppSettings = current.value
 
     override suspend fun saveSettings(settings: AppSettings) {
-        current = settings
+        current.value = settings
         savedSettings = settings
     }
+
+    override fun observeSettings(): Flow<AppSettings> = current
 }

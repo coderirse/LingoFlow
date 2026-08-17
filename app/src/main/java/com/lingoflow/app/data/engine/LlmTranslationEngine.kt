@@ -1,5 +1,6 @@
 package com.lingoflow.app.data.engine
 
+import com.lingoflow.app.domain.engine.StreamingTranslationEngine
 import com.lingoflow.app.domain.engine.TranslationEngine
 import com.lingoflow.app.domain.exception.LlmException
 import com.lingoflow.app.domain.model.TranslationException
@@ -15,9 +16,11 @@ import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -32,7 +35,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class LlmTranslationEngine(
     private val settingsRepository: SettingsRepository,
     private val providerFactory: (ProviderConfig) -> LlmProvider
-) : TranslationEngine {
+) : TranslationEngine, StreamingTranslationEngine {
 
     private val _status = MutableStateFlow(TranslationStatus.IDLE)
     override val status: StateFlow<TranslationStatus> = _status.asStateFlow()
@@ -46,27 +49,11 @@ class LlmTranslationEngine(
             return Result.failure(TranslationException("STANDARD mode is handled on-device."))
         }
 
-        val settings = settingsRepository.getSettings()
-        val config = settings.llmProviders[settings.activeLlmProviderId]
-            ?: ProviderConfig(
-                providerId = settings.activeLlmProviderId,
-                apiKey = "",
-                baseUrl = null,
-                model = settings.activeLlmProviderId.defaultModel
-            )
-        if (config.apiKey.isBlank()) {
-            return Result.failure(TranslationException("LLM API key is not configured."))
-        }
+        val config = activeProviderConfig()
+            ?: return Result.failure(TranslationException("LLM API key is not configured."))
 
         val provider = providerFactory(config)
-        val chatRequest = ChatRequest(
-            model = config.model.ifBlank { config.providerId.defaultModel },
-            messages = listOf(
-                Message(role = "system", content = systemPrompt(request)),
-                Message(role = "user", content = request.text)
-            ),
-            temperature = config.temperature
-        )
+        val chatRequest = buildChatRequest(request, config)
 
         return try {
             _status.value = TranslationStatus.TRANSLATING
@@ -80,6 +67,50 @@ class LlmTranslationEngine(
             _status.value = TranslationStatus.IDLE
         }
     }
+
+    override fun translateStream(request: TranslationRequest): Flow<String> = flow {
+        require(request.mode in STREAMABLE_MODES) {
+            "Only NATURAL/CONCISE/FORMAL modes support streaming"
+        }
+        val config = activeProviderConfig()
+            ?: throw TranslationException("LLM API key is not configured.")
+
+        val provider = providerFactory(config)
+        try {
+            _status.value = TranslationStatus.TRANSLATING
+            provider.chatStream(buildChatRequest(request, config)).collect { emit(it) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw e.toUserFriendlyError()
+        } finally {
+            _status.value = TranslationStatus.IDLE
+        }
+    }
+
+    private suspend fun activeProviderConfig(): ProviderConfig? {
+        val settings = settingsRepository.getSettings()
+        val config = settings.llmProviders[settings.activeLlmProviderId]
+            ?: ProviderConfig(
+                providerId = settings.activeLlmProviderId,
+                apiKey = "",
+                baseUrl = null,
+                model = settings.activeLlmProviderId.defaultModel
+            )
+        return config.takeIf { it.apiKey.isNotBlank() }
+    }
+
+    private fun buildChatRequest(
+        request: TranslationRequest,
+        config: ProviderConfig
+    ) = ChatRequest(
+        model = config.model.ifBlank { config.providerId.defaultModel },
+        messages = listOf(
+            Message(role = "system", content = systemPrompt(request)),
+            Message(role = "user", content = request.text)
+        ),
+        temperature = config.temperature
+    )
 
     private fun systemPrompt(request: TranslationRequest): String {
         val source = request.sourceLanguage.displayName
@@ -163,5 +194,13 @@ class LlmTranslationEngine(
         is LlmException.Network ->
             TranslationException("Network error. Please check your connection.")
         else -> TranslationException("Translation failed. Please try again.", this)
+    }
+
+    private companion object {
+        val STREAMABLE_MODES = setOf(
+            TranslationMode.NATURAL,
+            TranslationMode.CONCISE,
+            TranslationMode.FORMAL
+        )
     }
 }

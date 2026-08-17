@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lingoflow.app.data.update.UpdateChecker
 import com.lingoflow.app.domain.model.llm.LlmProviderId
+import com.lingoflow.app.domain.model.settings.AppLanguage
 import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.ProviderConfig
+import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -69,6 +71,22 @@ class SettingsViewModel @Inject constructor(
 
     fun updateDefaultMode(mode: TranslationMode) =
         mutateSettings { it.copy(defaultTranslationMode = mode) }
+
+    /** Theme changes apply instantly, so persist them right away. */
+    fun updateThemeMode(mode: ThemeMode) {
+        mutateSettings { it.copy(themeMode = mode) }
+        viewModelScope.launch {
+            settingsRepository.saveSettings(_uiState.value.settings)
+        }
+    }
+
+    /** Language changes apply instantly, so persist them right away. */
+    fun updateAppLanguage(language: AppLanguage) {
+        mutateSettings { it.copy(appLanguage = language) }
+        viewModelScope.launch {
+            settingsRepository.saveSettings(_uiState.value.settings)
+        }
+    }
 
     fun saveSettings() {
         val snapshot = _uiState.value.settings

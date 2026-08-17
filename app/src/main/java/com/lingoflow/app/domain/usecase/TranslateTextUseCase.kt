@@ -1,5 +1,6 @@
 package com.lingoflow.app.domain.usecase
 
+import com.lingoflow.app.domain.engine.StreamingTranslationEngine
 import com.lingoflow.app.domain.engine.TranslationEngine
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.TranslationStatus
@@ -26,5 +27,11 @@ class TranslateTextUseCase @Inject constructor(
             return Result.failure(TranslationException("Nothing to translate."))
         }
         return engine.translate(request)
+    }
+
+    /** Streaming translation, when the bound engine supports it; null otherwise. */
+    fun translateStream(request: TranslationRequest): Flow<String>? {
+        if (request.text.isBlank()) return null
+        return (engine as? StreamingTranslationEngine)?.translateStream(request)
     }
 }

@@ -2,6 +2,12 @@ package com.lingoflow.app.ui.home
 
 import android.content.ClipData
 import android.content.Intent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -67,8 +73,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -86,14 +94,12 @@ import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
+import com.lingoflow.app.ui.dictionary.WordPreviewSheet
 import com.lingoflow.app.ui.history.HistoryRoute
+import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.learning.LearningRoute
-import com.lingoflow.app.ui.theme.LingoFlowOnSurface
-import com.lingoflow.app.ui.theme.LingoFlowOnSurfaceVariant
 import com.lingoflow.app.ui.theme.LingoFlowPrimary
 import com.lingoflow.app.ui.theme.LingoFlowSecondary
-import com.lingoflow.app.ui.theme.LingoFlowSurface
-import com.lingoflow.app.ui.theme.LingoFlowSurfaceElevated
 import com.lingoflow.app.ui.theme.LingoFlowTheme
 import kotlinx.coroutines.launch
 
@@ -118,6 +124,7 @@ fun HomeRoute(
         onLookupWordConsumed = viewModel::consumeLookupWord,
         onSpeakClick = viewModel::onSpeakClick,
         onToggleFavoriteTranslation = viewModel::onToggleFavoriteTranslation,
+        onCancelStreaming = viewModel::onCancelStreaming,
         onSettingsClick = onNavigateToSettings
     )
 }
@@ -137,6 +144,7 @@ fun HomeScreen(
     onLookupWordConsumed: () -> Unit,
     onSpeakClick: () -> Unit,
     onToggleFavoriteTranslation: () -> Unit,
+    onCancelStreaming: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -144,6 +152,7 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+    val strings = LocalStrings.current
     val context = LocalContext.current
 
     LaunchedEffect(uiState.snackbarMessage) {
@@ -153,13 +162,30 @@ fun HomeScreen(
         }
     }
 
-    // Tap-to-lookup: a word was tapped in the translation result.
+    // Tap-to-lookup, stage one: compact preview card.
+    var fullLookupWord by remember { mutableStateOf<String?>(null) }
     uiState.lookupWord?.let { word ->
-        DictionaryBottomSheet(
-            initialWord = word,
+        WordPreviewSheet(
+            word = word,
             onDismiss = onLookupWordConsumed,
+            onViewFullDefinition = {
+                fullLookupWord = word
+                onLookupWordConsumed()
+            },
             onGoToSettings = {
                 onLookupWordConsumed()
+                onSettingsClick()
+            }
+        )
+    }
+
+    // Tap-to-lookup, stage two: full dictionary sheet.
+    fullLookupWord?.let { word ->
+        DictionaryBottomSheet(
+            initialWord = word,
+            onDismiss = { fullLookupWord = null },
+            onGoToSettings = {
+                fullLookupWord = null
                 onSettingsClick()
             }
         )
@@ -196,7 +222,7 @@ fun HomeScreen(
                                 )
                             )
                         )
-                        snackbarHostState.showSnackbar("Copied")
+                        snackbarHostState.showSnackbar(strings.copied)
                     }
                 },
                 onShare = {
@@ -220,6 +246,7 @@ fun HomeScreen(
                 onWordClick = onWordClick,
                 onSpeakClick = onSpeakClick,
                 onToggleFavoriteTranslation = onToggleFavoriteTranslation,
+                onCancelStreaming = onCancelStreaming,
                 onGoToSettings = onSettingsClick,
                 modifier = Modifier
                     .fillMaxSize()
@@ -253,7 +280,8 @@ private fun HomeTopBar(
     onTabSelected: (Int) -> Unit,
     onSettingsClick: () -> Unit
 ) {
-    val tabs = listOf("Translate", "History", "Learning")
+    val strings = LocalStrings.current
+    val tabs = listOf(strings.tabTranslate, strings.tabHistory, strings.tabLearning)
 
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
@@ -274,8 +302,8 @@ private fun HomeTopBar(
             IconButton(onClick = onSettingsClick) {
                 Icon(
                     imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = LingoFlowOnSurfaceVariant
+                    contentDescription = strings.settings,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -298,7 +326,7 @@ private fun HomeTab(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                color = if (selected) LingoFlowOnSurface else LingoFlowOnSurfaceVariant,
+                color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -342,6 +370,7 @@ private fun TranslateTab(
     onWordClick: (String) -> Unit,
     onSpeakClick: () -> Unit,
     onToggleFavoriteTranslation: () -> Unit,
+    onCancelStreaming: () -> Unit,
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -382,7 +411,8 @@ private fun TranslateTab(
         item {
             TranslateButton(
                 uiState = uiState,
-                onTranslateClick = onTranslateClick
+                onTranslateClick = onTranslateClick,
+                onCancelStreaming = onCancelStreaming
             )
         }
         item {
@@ -410,10 +440,11 @@ private fun InputCard(
     onClearInput: () -> Unit,
     onPaste: () -> Unit
 ) {
+    val strings = LocalStrings.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = LingoFlowSurfaceElevated),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -424,15 +455,15 @@ private fun InputCard(
                     .fillMaxWidth()
                     .heightIn(min = 80.dp, max = 150.dp),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = LingoFlowOnSurface
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             ) { innerTextField ->
                 Box {
                     if (inputText.isEmpty()) {
                         Text(
-                            text = "Enter text to translate...",
+                            text = strings.enterText,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = LingoFlowOnSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     innerTextField()
@@ -445,15 +476,15 @@ private fun InputCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onPaste) {
-                    Text("Paste", color = LingoFlowPrimary)
+                    Text(strings.paste, color = LingoFlowPrimary)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (inputText.isNotEmpty()) {
                         IconButton(onClick = onClearInput) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear input",
-                                tint = LingoFlowOnSurfaceVariant
+                                contentDescription = strings.clearInput,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -461,8 +492,8 @@ private fun InputCard(
                     IconButton(onClick = {}, enabled = false) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_mic),
-                            contentDescription = "Voice input (coming soon)",
-                            tint = LingoFlowOnSurfaceVariant,
+                            contentDescription = strings.voiceInput,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -484,7 +515,7 @@ private fun LanguageBar(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = LingoFlowSurface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
@@ -534,13 +565,13 @@ private fun LanguagePicker(
             Text(
                 text = selected.displayName,
                 style = MaterialTheme.typography.titleSmall,
-                color = LingoFlowOnSurface,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = null,
-                tint = LingoFlowOnSurfaceVariant
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         DropdownMenu(
@@ -594,7 +625,7 @@ private fun ModeCard(
             .defaultMinSize(minWidth = 72.dp)
             .height(48.dp),
         shape = RoundedCornerShape(12.dp),
-        color = if (isSelected) LingoFlowPrimary else LingoFlowSurface
+        color = if (isSelected) LingoFlowPrimary else MaterialTheme.colorScheme.surface
     ) {
         Box(
             contentAlignment = Alignment.Center,
@@ -603,7 +634,7 @@ private fun ModeCard(
             Text(
                 text = mode.displayName,
                 style = MaterialTheme.typography.labelLarge,
-                color = if (isSelected) LingoFlowOnSurface else LingoFlowOnSurfaceVariant,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -614,32 +645,58 @@ private fun ModeCard(
 @Composable
 private fun TranslateButton(
     uiState: HomeUiState,
-    onTranslateClick: () -> Unit
+    onTranslateClick: () -> Unit,
+    onCancelStreaming: () -> Unit
 ) {
+    val strings = LocalStrings.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Button(
-        onClick = onTranslateClick,
-        enabled = uiState.inputText.isNotBlank() && !uiState.isTranslating,
+        onClick = {
+            if (uiState.isStreaming) {
+                onCancelStreaming()
+            } else {
+                keyboardController?.hide()
+                onTranslateClick()
+            }
+        },
+        enabled = uiState.isStreaming ||
+            (uiState.inputText.isNotBlank() && !uiState.isTranslating),
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = LingoFlowPrimary)
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (uiState.isStreaming) {
+                MaterialTheme.colorScheme.error
+            } else {
+                LingoFlowPrimary
+            }
+        )
     ) {
-        if (uiState.isTranslating) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = LingoFlowOnSurface
-            )
-            Spacer(modifier = Modifier.size(12.dp))
-            Text(
-                when (uiState.status) {
-                    TranslationStatus.PREPARING_MODEL -> "Preparing translation model..."
-                    else -> "Translating..."
-                }
-            )
-        } else {
-            Text("Translate", style = MaterialTheme.typography.titleMedium)
+        when {
+            uiState.isStreaming -> {
+                Text(strings.cancel, style = MaterialTheme.typography.titleMedium)
+            }
+
+            uiState.isTranslating -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.size(12.dp))
+                Text(
+                    when (uiState.status) {
+                        TranslationStatus.PREPARING_MODEL -> strings.preparingModel
+                        else -> strings.translating
+                    }
+                )
+            }
+
+            else -> {
+                Text(strings.translate, style = MaterialTheme.typography.titleMedium)
+            }
         }
     }
 }
@@ -653,13 +710,14 @@ private fun TranslationResultCard(
     onSpeakClick: () -> Unit,
     onToggleFavorite: () -> Unit
 ) {
+    val strings = LocalStrings.current
     val response = uiState.translationResponse
     val hasResult = uiState.translatedText.isNotEmpty()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = LingoFlowSurfaceElevated),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
@@ -669,7 +727,7 @@ private fun TranslationResultCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Translation",
+                    text = strings.translationTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = LingoFlowPrimary
                 )
@@ -679,11 +737,11 @@ private fun TranslationResultCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Speak translation",
+                        contentDescription = strings.speakTranslation,
                         tint = if (uiState.ttsReady && hasResult) {
                             LingoFlowPrimary
                         } else {
-                            LingoFlowOnSurfaceVariant
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
                 }
@@ -710,20 +768,24 @@ private fun TranslationResultCard(
                     }
                 }
 
+                uiState.isStreaming -> {
+                    StreamingText(text = uiState.streamingText)
+                }
+
                 response is TranslationResponse.Learning -> {
                     SelectionContainer {
                         Text(
                             text = response.translatedText,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = LingoFlowOnSurface
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     response.contextExplanation?.let { explanation ->
                         Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(color = LingoFlowSurface)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surface)
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Analysis",
+                            text = strings.analysis,
                             color = LingoFlowSecondary,
                             style = MaterialTheme.typography.labelLarge
                         )
@@ -731,36 +793,36 @@ private fun TranslationResultCard(
                             Text(
                                 text = explanation.meaningInContext,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = LingoFlowOnSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         explanation.grammarNote?.let {
                             Text(
                                 text = it,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = LingoFlowOnSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         explanation.usageNote?.let {
                             Text(
                                 text = it,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = LingoFlowOnSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         if (explanation.synonymsInContext.isNotEmpty()) {
                             Text(
-                                text = "Synonyms: " + explanation.synonymsInContext
+                                text = strings.synonymsPrefix + explanation.synonymsInContext
                                     .joinToString(", ") { it.word },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = LingoFlowOnSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                     if (response.dictionaryEntries.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Key Words",
+                            text = strings.keyWords,
                             color = LingoFlowSecondary,
                             style = MaterialTheme.typography.labelLarge
                         )
@@ -770,7 +832,7 @@ private fun TranslationResultCard(
                             Text(
                                 text = "• ${entry.word} — $meaning",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = LingoFlowOnSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -790,7 +852,7 @@ private fun TranslationResultCard(
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
                                 ),
-                                color = LingoFlowOnSurface
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -802,9 +864,9 @@ private fun TranslationResultCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Your translation will appear here.",
+                            text = strings.emptyResult,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = LingoFlowOnSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -818,13 +880,13 @@ private fun TranslationResultCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onCopy) {
-                        Text("Copy", color = LingoFlowPrimary)
+                        Text(strings.copy, color = LingoFlowPrimary)
                     }
                     IconButton(onClick = onShare) {
                         Icon(
                             imageVector = Icons.Default.Share,
-                            contentDescription = "Share translation",
-                            tint = LingoFlowOnSurfaceVariant
+                            contentDescription = strings.shareTranslation,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     IconButton(
@@ -837,11 +899,11 @@ private fun TranslationResultCard(
                             } else {
                                 Icons.Default.FavoriteBorder
                             },
-                            contentDescription = "Favorite translation",
+                            contentDescription = strings.favoriteTranslation,
                             tint = if (uiState.isCurrentFavorite) {
                                 LingoFlowSecondary
                             } else {
-                                LingoFlowOnSurfaceVariant
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
                     }
@@ -883,9 +945,44 @@ private fun ClickableWords(
                     lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5,
                     textDecoration = if (isTapped) TextDecoration.Underline else null
                 ),
-                color = if (isTapped) LingoFlowPrimary else LingoFlowOnSurface
+                color = if (isTapped) LingoFlowPrimary else MaterialTheme.colorScheme.onSurface
             )
         }
+    }
+}
+
+/** Streaming translation text with a blinking typewriter cursor. */
+@Composable
+private fun StreamingText(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "cursor")
+    val cursorAlpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursorAlpha"
+    )
+
+    Row(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = text.ifEmpty { " " },
+            style = MaterialTheme.typography.bodyLarge.copy(
+                lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            text = "▌",
+            style = MaterialTheme.typography.bodyLarge,
+            color = LingoFlowPrimary,
+            modifier = Modifier.alpha(cursorAlpha)
+        )
     }
 }
 
@@ -894,13 +991,14 @@ private fun DictionaryLookupSection(
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalStrings.current
     var word by remember { mutableStateOf("") }
     var showSheet by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = LingoFlowSurface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -908,7 +1006,7 @@ private fun DictionaryLookupSection(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "Dictionary",
+                text = strings.dictionary,
                 style = MaterialTheme.typography.titleSmall,
                 color = LingoFlowSecondary
             )
@@ -923,7 +1021,7 @@ private fun DictionaryLookupSection(
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp),
-                    placeholder = { Text("English word...") },
+                    placeholder = { Text(strings.englishWordHint) },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp)
                 )
@@ -933,7 +1031,7 @@ private fun DictionaryLookupSection(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
-                        contentDescription = "Look up word",
+                        contentDescription = strings.lookUpWord,
                         tint = LingoFlowPrimary
                     )
                 }
@@ -955,6 +1053,7 @@ private fun DictionaryLookupSection(
 
 @Composable
 private fun BrandingFooter(modifier: Modifier = Modifier) {
+    val strings = LocalStrings.current
     val context = LocalContext.current
 
     Column(
@@ -964,9 +1063,9 @@ private fun BrandingFooter(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Copyright © 2026 Stafind. All rights reserved.",
+            text = strings.copyright,
             style = MaterialTheme.typography.bodySmall,
-            color = LingoFlowOnSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
@@ -987,7 +1086,7 @@ private fun BrandingFooter(modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "View on GitHub",
+                text = strings.viewOnGitHub,
                 color = LingoFlowPrimary,
                 style = MaterialTheme.typography.labelLarge
             )
@@ -1015,6 +1114,7 @@ private fun HomeScreenPreview() {
             onLookupWordConsumed = {},
             onSpeakClick = {},
             onToggleFavoriteTranslation = {},
+            onCancelStreaming = {},
             onSettingsClick = {}
         )
     }

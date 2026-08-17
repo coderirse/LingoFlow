@@ -40,10 +40,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.translation.displayName
-import com.lingoflow.app.ui.theme.LingoFlowOnSurface
-import com.lingoflow.app.ui.theme.LingoFlowOnSurfaceVariant
+import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.theme.LingoFlowPrimary
-import com.lingoflow.app.ui.theme.LingoFlowSurface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +71,7 @@ fun HistoryScreen(
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalStrings.current
     var showClearConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -84,7 +83,7 @@ fun HistoryScreen(
                 horizontalArrangement = Arrangement.End
             ) {
                 TextButton(onClick = { showClearConfirm = true }) {
-                    Text("Clear All", color = LingoFlowPrimary)
+                    Text(strings.clearAll, color = LingoFlowPrimary)
                 }
             }
         }
@@ -98,14 +97,14 @@ fun HistoryScreen(
                 Icon(
                     imageVector = Icons.Default.DateRange,
                     contentDescription = null,
-                    tint = LingoFlowOnSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(48.dp)
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "No history yet",
+                    text = strings.noHistory,
                     style = MaterialTheme.typography.titleMedium,
-                    color = LingoFlowOnSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -127,8 +126,8 @@ fun HistoryScreen(
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
-            title = { Text("Clear all history?") },
-            text = { Text("This will permanently delete all translation records.") },
+            title = { Text(strings.clearAllTitle) },
+            text = { Text(strings.clearAllMessage) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -136,12 +135,12 @@ fun HistoryScreen(
                         showClearConfirm = false
                     }
                 ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text(strings.clear, color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
-                    Text("Cancel")
+                    Text(strings.cancel)
                 }
             }
         )
@@ -154,12 +153,13 @@ private fun HistoryCard(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val strings = LocalStrings.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = LingoFlowSurface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -171,7 +171,7 @@ private fun HistoryCard(
                     text = item.sourceText,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    color = LingoFlowOnSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -195,7 +195,7 @@ private fun HistoryCard(
             Text(
                 text = item.translatedText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = LingoFlowOnSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -210,13 +210,13 @@ private fun HistoryCard(
                 Text(
                     text = formatTimestamp(item.timestamp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = LingoFlowOnSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete record",
-                        tint = LingoFlowOnSurfaceVariant,
+                        contentDescription = strings.deleteRecord,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                 }

@@ -3,6 +3,8 @@ package com.lingoflow.app.ui.settings
 import com.lingoflow.app.data.repository.FakeSettingsRepository
 import com.lingoflow.app.data.update.UpdateChecker
 import com.lingoflow.app.domain.model.llm.LlmProviderId
+import com.lingoflow.app.domain.model.settings.AppLanguage
+import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -108,5 +110,40 @@ class SettingsViewModelTest {
         assertNull(
             viewModel.uiState.value.settings.llmProviders[LlmProviderId.DEEPSEEK]?.baseUrl
         )
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class SettingsViewModelAppearanceTest {
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
+    private fun createViewModel(
+        repository: FakeSettingsRepository = FakeSettingsRepository()
+    ) = SettingsViewModel(repository, UpdateChecker(OkHttpClient())) to repository
+
+    @Test
+    fun `theme change updates state and persists immediately`() = runTest {
+        val (viewModel, repository) = createViewModel()
+        advanceUntilIdle()
+
+        viewModel.updateThemeMode(ThemeMode.DARK)
+        advanceUntilIdle()
+
+        assertEquals(ThemeMode.DARK, viewModel.uiState.value.settings.themeMode)
+        assertEquals(ThemeMode.DARK, repository.savedSettings?.themeMode)
+    }
+
+    @Test
+    fun `language change updates state and persists immediately`() = runTest {
+        val (viewModel, repository) = createViewModel()
+        advanceUntilIdle()
+
+        viewModel.updateAppLanguage(AppLanguage.CHINESE)
+        advanceUntilIdle()
+
+        assertEquals(AppLanguage.CHINESE, viewModel.uiState.value.settings.appLanguage)
+        assertEquals(AppLanguage.CHINESE, repository.savedSettings?.appLanguage)
     }
 }

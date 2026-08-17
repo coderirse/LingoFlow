@@ -13,6 +13,8 @@ import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -99,5 +101,68 @@ class TranslationRouterTest {
         assertTrue(result.isSuccess)
         val response = result.getOrThrow() as TranslationResponse.Standard
         assertEquals("llm result", response.translatedText)
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class TranslationRouterStreamTest {
+
+    private fun settingsWithKey(apiKey: String) = FakeSettingsRepository(
+        AppSettings(
+            activeLlmProviderId = LlmProviderId.DEEPSEEK,
+            llmProviders = mapOf(
+                LlmProviderId.DEEPSEEK to ProviderConfig(
+                    providerId = LlmProviderId.DEEPSEEK,
+                    apiKey = apiKey,
+                    baseUrl = null,
+                    model = "deepseek-chat"
+                )
+            ),
+            dictionaryApiKey = ""
+        )
+    )
+
+    private fun createRouter(apiKey: String, stream: kotlinx.coroutines.flow.Flow<String>) =
+        TranslationRouter(
+            mlKitEngine = MlKitTranslationEngine(FakeTranslator()),
+            llmEngine = LlmTranslationEngine(settingsWithKey(apiKey)) {
+                FakeLlmProvider(streamFlow = stream)
+            },
+            settingsRepository = settingsWithKey(apiKey)
+        )
+
+    private fun request() = TranslationRequest(
+        text = "Hello",
+        sourceLanguage = Language.ENGLISH,
+        targetLanguage = Language.CHINESE,
+        mode = TranslationMode.NATURAL
+    )
+
+    @Test
+    fun `stream with api key emits llm deltas`() = runTest {
+        val router = createRouter("sk-test", flowOf("你", "好"))
+
+        val deltas = router.translateStream(request()).toList()
+
+        assertEquals(listOf("你", "好"), deltas)
+    }
+
+    @Test
+    fun `stream without api key falls back to a single ml kit emission`() = runTest {
+        val router = createRouter("", flowOf("should", "not", "emit"))
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val deltas = router.translateStream(request()).toList()
+        advanceUntilIdle()
+
+        assertEquals(listOf("你好"), deltas)
+        assertEquals(
+            listOf("LLM API key not set. Using on-device translation."),
+            received
+        )
+        job.cancel()
     }
 }

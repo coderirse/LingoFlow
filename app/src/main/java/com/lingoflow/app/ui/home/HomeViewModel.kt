@@ -40,7 +40,11 @@ data class HomeUiState(
     /** Whether the current translation record is favorited. */
     val isCurrentFavorite: Boolean = false,
     /** Whether text-to-speech is ready on this device. */
-    val ttsReady: Boolean = false
+    val ttsReady: Boolean = false,
+    /** True while an LLM streaming translation is in progress. */
+    val isStreaming: Boolean = false,
+    /** Text received so far during a streaming translation. */
+    val streamingText: String = ""
 ) {
     /** Convenience accessor for copy/share regardless of response type. */
     val translatedText: String
@@ -120,6 +124,27 @@ class HomeViewModel @Inject constructor(
         val snapshot = _uiState.value
         if (snapshot.inputText.isBlank() || snapshot.isTranslating) return
 
+        if (snapshot.translationMode in STREAMING_MODES) {
+            startStreamingTranslation(snapshot)
+        } else {
+            startOneShotTranslation(snapshot)
+        }
+    }
+
+    /** Cancels an in-flight streaming translation, keeping the partial text. */
+    fun onCancelStreaming() {
+        streamJob?.cancel()
+    }
+
+    private var streamJob: kotlinx.coroutines.Job? = null
+
+    private fun translatedTextOf(response: TranslationResponse): String =
+        when (response) {
+            is TranslationResponse.Standard -> response.translatedText
+            is TranslationResponse.Learning -> response.translatedText
+        }
+
+    private fun startOneShotTranslation(snapshot: HomeUiState) {
         viewModelScope.launch {
             _uiState.update { it.copy(isTranslating = true, errorMessage = null) }
             translateText(
@@ -130,27 +155,7 @@ class HomeViewModel @Inject constructor(
                     mode = snapshot.translationMode
                 )
             ).onSuccess { response ->
-                val historyItem = TranslationHistoryItem(
-                    sourceText = snapshot.inputText,
-                    translatedText = when (response) {
-                        is TranslationResponse.Standard -> response.translatedText
-                        is TranslationResponse.Learning -> response.translatedText
-                    },
-                    sourceLanguage = snapshot.sourceLanguage,
-                    targetLanguage = snapshot.targetLanguage,
-                    mode = snapshot.translationMode
-                )
-                historyRepository.addHistory(historyItem)
-                _uiState.update {
-                    it.copy(
-                        isTranslating = false,
-                        translationResponse = response,
-                        errorMessage = null,
-                        currentHistoryId = historyItem.id,
-                        isCurrentFavorite = false,
-                        ttsReady = ttsEngine.isReady
-                    )
-                }
+                onTranslationFinished(snapshot, translatedTextOf(response), response)
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
@@ -161,6 +166,86 @@ class HomeViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    private fun startStreamingTranslation(snapshot: HomeUiState) {
+        streamJob?.cancel()
+        val request = TranslationRequest(
+            text = snapshot.inputText,
+            sourceLanguage = snapshot.sourceLanguage,
+            targetLanguage = snapshot.targetLanguage,
+            mode = snapshot.translationMode
+        )
+        val stream = translateText.translateStream(request)
+        if (stream == null) {
+            startOneShotTranslation(snapshot)
+            return
+        }
+
+        streamJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isTranslating = true,
+                    isStreaming = true,
+                    streamingText = "",
+                    errorMessage = null
+                )
+            }
+            val accumulated = StringBuilder()
+            try {
+                stream.collect { delta ->
+                    accumulated.append(delta)
+                    _uiState.update { it.copy(streamingText = accumulated.toString()) }
+                }
+                onTranslationFinished(
+                    snapshot,
+                    accumulated.toString(),
+                    TranslationResponse.Standard(accumulated.toString())
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // User cancelled: keep the partial text on screen, don't save.
+                _uiState.update {
+                    it.copy(isTranslating = false, isStreaming = false)
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTranslating = false,
+                        isStreaming = false,
+                        streamingText = "",
+                        errorMessage = (e as? TranslationException)?.userMessage
+                            ?: "Translation failed. Please try again."
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun onTranslationFinished(
+        snapshot: HomeUiState,
+        translatedText: String,
+        response: TranslationResponse
+    ) {
+        val historyItem = TranslationHistoryItem(
+            sourceText = snapshot.inputText,
+            translatedText = translatedText,
+            sourceLanguage = snapshot.sourceLanguage,
+            targetLanguage = snapshot.targetLanguage,
+            mode = snapshot.translationMode
+        )
+        historyRepository.addHistory(historyItem)
+        _uiState.update {
+            it.copy(
+                isTranslating = false,
+                isStreaming = false,
+                streamingText = "",
+                translationResponse = response,
+                errorMessage = null,
+                currentHistoryId = historyItem.id,
+                isCurrentFavorite = false,
+                ttsReady = ttsEngine.isReady
+            )
         }
     }
 
@@ -218,5 +303,13 @@ class HomeViewModel @Inject constructor(
     /** Called by the UI after the dictionary sheet for [HomeUiState.lookupWord] closed. */
     fun consumeLookupWord() {
         _uiState.update { it.copy(lookupWord = null) }
+    }
+
+    private companion object {
+        val STREAMING_MODES = setOf(
+            TranslationMode.NATURAL,
+            TranslationMode.CONCISE,
+            TranslationMode.FORMAL
+        )
     }
 }
