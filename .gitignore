@@ -21,7 +21,6 @@ captures/
 # Keystore
 *.jks
 *.keystore
-keystore.properties
 
 # OS
 Thumbs.db

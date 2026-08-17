@@ -24,17 +24,6 @@ A modern Android translation app powered by ML Kit, Merriam-Webster Dictionary, 
 ./gradlew :app:assembleDebug
 ```
 
-### Release Build
-
-1. 将 `lingoflow-release.jks` 放置于 `app/` 目录下
-2. 在项目根目录 `local.properties` 中添加：
-   ```
-   RELEASE_STORE_PASSWORD=your_keystore_password
-   RELEASE_KEY_ALIAS=lingoflow
-   RELEASE_KEY_PASSWORD=your_key_password
-   ```
-3. 执行 `./gradlew :app:assembleRelease`
-
 ## License
 
 [MIT](LICENSE) © 2026 Stafind
