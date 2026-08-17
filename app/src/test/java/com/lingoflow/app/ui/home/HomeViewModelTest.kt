@@ -52,9 +52,15 @@ class HomeViewModelTest {
         engine: TranslationEngine = MlKitTranslationEngine(FakeTranslator()),
         settings: FakeSettingsRepository = FakeSettingsRepository(),
         history: FakeHistoryRepository = FakeHistoryRepository(),
-        tts: FakeTtsEngine = FakeTtsEngine()
+        tts: FakeTtsEngine = FakeTtsEngine(),
+        lookup: com.lingoflow.app.domain.usecase.LookupWordUseCase =
+            com.lingoflow.app.domain.usecase.LookupWordUseCase(settings) {
+                com.lingoflow.app.data.llm.FakeLlmProvider()
+            }
     ) = ViewModelBundle(
-        viewModel = HomeViewModel(TranslateTextUseCase(engine), settings, history, tts),
+        viewModel = HomeViewModel(
+            TranslateTextUseCase(engine), settings, history, tts, lookup
+        ),
         history = history,
         tts = tts
     )
@@ -405,5 +411,56 @@ class HomeViewModelTest {
         val state = bundle.viewModel.uiState.value
         assertFalse(state.isStreaming)
         assertEquals("Network error. Please check your connection.", state.errorMessage)
+    }
+    @Test
+    fun `single english word to chinese loads dictionary block`() = runTest {
+        val provider = com.lingoflow.app.data.llm.FakeLlmProvider(
+            chatResult = com.lingoflow.app.domain.model.llm.ChatResponse(
+                content = """{"word": "consider", "entries": [{"partOfSpeech": "vt.", "meanings": ["考虑", "认为"]}], "example": "I will consider it.", "exampleTranslation": "我会考虑的。"}""",
+                finishReason = "stop",
+                usage = null
+            )
+        )
+        val settings = FakeSettingsRepository(
+            com.lingoflow.app.domain.model.settings.AppSettings(
+                activeLlmProviderId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                llmProviders = mapOf(
+                    com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK to
+                        com.lingoflow.app.domain.model.settings.ProviderConfig(
+                            providerId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                            apiKey = "sk-test",
+                            baseUrl = null,
+                            model = "deepseek-chat"
+                        )
+                ),
+                dictionaryApiKey = ""
+            )
+        )
+        val lookup = com.lingoflow.app.domain.usecase.LookupWordUseCase(settings) { provider }
+        val bundle = createViewModel(settings = settings, lookup = lookup)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("consider")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val info = bundle.viewModel.uiState.value.wordLookup
+        assertNotNull(info)
+        assertEquals("consider", info!!.word)
+        assertEquals(listOf("考虑", "认为"), info.entries[0].meanings)
+        // ML Kit direct translation is still shown above.
+        assertTrue(bundle.viewModel.uiState.value.translationResponse is TranslationResponse.Standard)
+    }
+
+    @Test
+    fun `sentence translation does not trigger word lookup`() = runTest {
+        val bundle = createViewModel()
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello world")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        assertNull(bundle.viewModel.uiState.value.wordLookup)
     }
 }

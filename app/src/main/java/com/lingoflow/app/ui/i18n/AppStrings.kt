@@ -51,6 +51,7 @@ data class AppStrings(
     val networkError: String,
     val wordNotFound: String,
     val noResults: String,
+    val chineseMeaningUnavailable: String,
     val goToSettings: String,
     // Branding
     val copyright: String,
@@ -142,6 +143,7 @@ val EnStrings = AppStrings(
     networkError = "Network error. Please check your connection.",
     wordNotFound = "Word not found. Did you mean: ",
     noResults = "No matching entry found.",
+    chineseMeaningUnavailable = "Chinese definition unavailable.",
     goToSettings = "Go to Settings",
     copyright = "Copyright © 2026 Stafind. All rights reserved.",
     viewOnGitHub = "View on GitHub",
@@ -220,6 +222,7 @@ val ZhStrings = EnStrings.copy(
     networkError = "网络错误，请检查网络连接。",
     wordNotFound = "未找到该单词。你是不是要找：",
     noResults = "未找到匹配的词条。",
+    chineseMeaningUnavailable = "中文释义暂不可用。",
     goToSettings = "前往设置",
     copyright = "Copyright © 2026 Stafind. All rights reserved.",
     viewOnGitHub = "在 GitHub 查看",

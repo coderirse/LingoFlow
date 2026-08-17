@@ -6,8 +6,10 @@ import com.lingoflow.app.data.dictionary.InflectionStemmer
 import com.lingoflow.app.data.tts.TtsEngine
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
+import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.repository.DictionaryRepository
 import com.lingoflow.app.domain.repository.FavoritesRepository
+import com.lingoflow.app.domain.usecase.LookupWordUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,11 +24,20 @@ import kotlinx.coroutines.launch
 class DictionaryViewModel @Inject constructor(
     private val dictionaryRepository: DictionaryRepository,
     private val favoritesRepository: FavoritesRepository,
-    private val ttsEngine: TtsEngine
+    private val ttsEngine: TtsEngine,
+    private val lookupWordUseCase: LookupWordUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<DictionaryUiState>(DictionaryUiState.Idle)
     val uiState: StateFlow<DictionaryUiState> = _uiState.asStateFlow()
+
+    /** Chinese dictionary info from the LLM; null until loaded or on failure. */
+    private val _lookupInfo = MutableStateFlow<WordLookupInfo?>(null)
+    val lookupInfo: StateFlow<WordLookupInfo?> = _lookupInfo.asStateFlow()
+
+    /** True when the LLM lookup finished without usable Chinese info. */
+    private val _lookupInfoUnavailable = MutableStateFlow(false)
+    val lookupInfoUnavailable: StateFlow<Boolean> = _lookupInfoUnavailable.asStateFlow()
 
     /** Current set of favorited words, for the favorite toggle. */
     val favorites: StateFlow<Set<String>> = favoritesRepository.getFavorites()
@@ -44,6 +55,15 @@ class DictionaryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = DictionaryUiState.Loading
             _uiState.value = lookUpWithInflectionFallback(word.trim().lowercase())
+        }
+        // Chinese glosses come from the LLM in parallel; failures are silent
+        // and the UI falls back to the Merriam-Webster English entry.
+        _lookupInfo.value = null
+        _lookupInfoUnavailable.value = false
+        viewModelScope.launch {
+            lookupWordUseCase(word.trim().lowercase())
+                .onSuccess { _lookupInfo.value = it }
+                .onFailure { _lookupInfoUnavailable.value = true }
         }
     }
 

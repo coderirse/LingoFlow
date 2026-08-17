@@ -94,6 +94,7 @@ import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
+import com.lingoflow.app.ui.dictionary.WordLookupInfoContent
 import com.lingoflow.app.ui.dictionary.WordPreviewSheet
 import com.lingoflow.app.ui.history.HistoryRoute
 import com.lingoflow.app.ui.i18n.LocalStrings
@@ -854,6 +855,21 @@ private fun TranslationResultCard(
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                        }
+                        // Youdao-style Chinese dictionary block for single words.
+                        uiState.wordLookup?.let { info ->
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.surface
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = info.word,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            WordLookupInfoContent(info = info)
                         }
                     }
                 }

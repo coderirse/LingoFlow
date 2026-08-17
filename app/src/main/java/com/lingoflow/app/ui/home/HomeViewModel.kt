@@ -7,12 +7,14 @@ import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.TranslationStatus
 import com.lingoflow.app.domain.model.history.TranslationHistoryItem
+import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.ttsTag
 import com.lingoflow.app.domain.repository.HistoryRepository
 import com.lingoflow.app.domain.repository.SettingsRepository
+import com.lingoflow.app.domain.usecase.LookupWordUseCase
 import com.lingoflow.app.domain.usecase.TranslateTextUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -44,7 +46,9 @@ data class HomeUiState(
     /** True while an LLM streaming translation is in progress. */
     val isStreaming: Boolean = false,
     /** Text received so far during a streaming translation. */
-    val streamingText: String = ""
+    val streamingText: String = "",
+    /** Chinese dictionary info for single-word English→Chinese translations. */
+    val wordLookup: WordLookupInfo? = null
 ) {
     /** Convenience accessor for copy/share regardless of response type. */
     val translatedText: String
@@ -60,7 +64,8 @@ class HomeViewModel @Inject constructor(
     private val translateText: TranslateTextUseCase,
     private val settingsRepository: SettingsRepository,
     private val historyRepository: HistoryRepository,
-    private val ttsEngine: TtsEngine
+    private val ttsEngine: TtsEngine,
+    private val lookupWordUseCase: LookupWordUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -244,8 +249,31 @@ class HomeViewModel @Inject constructor(
                 errorMessage = null,
                 currentHistoryId = historyItem.id,
                 isCurrentFavorite = false,
-                ttsReady = ttsEngine.isReady
+                ttsReady = ttsEngine.isReady,
+                wordLookup = null
             )
+        }
+        maybeLoadWordLookup(snapshot)
+    }
+
+    /**
+     * Youdao-style enrichment: a lone English word translated to Chinese via
+     * ML Kit gets an additional Chinese dictionary block below the direct
+     * translation. Silent no-op on any failure.
+     */
+    private fun maybeLoadWordLookup(snapshot: HomeUiState) {
+        val word = snapshot.inputText.trim()
+        val eligible = snapshot.translationMode == TranslationMode.STANDARD &&
+            snapshot.targetLanguage == Language.CHINESE &&
+            word.matches(SINGLE_ENGLISH_WORD)
+        if (!eligible) return
+
+        viewModelScope.launch {
+            lookupWordUseCase(word.lowercase())
+                .onSuccess { info ->
+                    _uiState.update { it.copy(wordLookup = info) }
+                }
+            // Failure: silently keep the plain ML Kit translation only.
         }
     }
 
@@ -311,5 +339,6 @@ class HomeViewModel @Inject constructor(
             TranslationMode.CONCISE,
             TranslationMode.FORMAL
         )
+        val SINGLE_ENGLISH_WORD = Regex("^[a-zA-Z-]{1,30}$")
     }
 }

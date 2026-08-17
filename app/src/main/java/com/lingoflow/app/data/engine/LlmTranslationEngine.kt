@@ -129,12 +129,13 @@ class LlmTranslationEngine(
                     "to $target in a formal register suitable for business or academic contexts. " +
                     "Output ONLY the translation, no explanations."
             TranslationMode.LEARNING ->
-                "You are an English learning assistant. Translate the user's text from $source " +
-                    "to $target, then analyze it for a language learner. " +
+                "You are an English learning assistant for Chinese learners. " +
+                    "Translate the user's text from $source to $target, then analyze it. " +
                     "Respond with ONLY a JSON object (no markdown fences) with these keys: " +
                     "\"translation\" (string), \"meaning_in_context\" (string, explain the key " +
-                    "word or phrase usage), \"grammar_note\" (string or null), " +
-                    "\"usage_note\" (string or null), \"synonyms\" (array of strings)."
+                    "word or phrase usage in Chinese), \"grammar_note\" (string or null, in " +
+                    "Chinese), \"usage_note\" (string or null, in Chinese), \"synonyms\" " +
+                    "(array of English strings)."
             TranslationMode.STANDARD -> ""
         }
     }

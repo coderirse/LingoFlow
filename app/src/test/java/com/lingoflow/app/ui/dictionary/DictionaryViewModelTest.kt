@@ -1,6 +1,7 @@
 package com.lingoflow.app.ui.dictionary
 
 import com.lingoflow.app.data.repository.FakeFavoritesRepository
+import com.lingoflow.app.data.repository.FakeSettingsRepository
 import com.lingoflow.app.data.tts.FakeTtsEngine
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
@@ -48,8 +49,12 @@ class DictionaryViewModelTest {
     private fun createViewModel(
         repository: FakeDictionaryRepository,
         favorites: FakeFavoritesRepository = FakeFavoritesRepository(),
-        tts: FakeTtsEngine = FakeTtsEngine()
-    ) = DictionaryViewModel(repository, favorites, tts)
+        tts: FakeTtsEngine = FakeTtsEngine(),
+        lookup: com.lingoflow.app.domain.usecase.LookupWordUseCase =
+            com.lingoflow.app.domain.usecase.LookupWordUseCase(FakeSettingsRepository()) {
+                com.lingoflow.app.data.llm.FakeLlmProvider()
+            }
+    ) = DictionaryViewModel(repository, favorites, tts, lookup)
 
     @Test
     fun `successful lookup exposes Success state`() = runTest {
@@ -170,5 +175,53 @@ class DictionaryViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value is DictionaryUiState.Error)
+    }
+    @Test
+    fun `lookup info loads chinese glosses alongside the entry`() = runTest {
+        val provider = com.lingoflow.app.data.llm.FakeLlmProvider(
+            chatResult = com.lingoflow.app.domain.model.llm.ChatResponse(
+                content = """{"word": "hello", "entries": [{"partOfSpeech": "int.", "meanings": ["你好", "喂"]}], "example": "Hello, world.", "exampleTranslation": "你好，世界。"}""",
+                finishReason = "stop",
+                usage = null
+            )
+        )
+        val settings = com.lingoflow.app.data.repository.FakeSettingsRepository(
+            com.lingoflow.app.domain.model.settings.AppSettings(
+                activeLlmProviderId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                llmProviders = mapOf(
+                    com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK to
+                        com.lingoflow.app.domain.model.settings.ProviderConfig(
+                            providerId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                            apiKey = "sk-test",
+                            baseUrl = null,
+                            model = "deepseek-chat"
+                        )
+                ),
+                dictionaryApiKey = ""
+            )
+        )
+        val lookup = com.lingoflow.app.domain.usecase.LookupWordUseCase(settings) { provider }
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository, lookup = lookup)
+
+        viewModel.lookUp("hello")
+        advanceUntilIdle()
+
+        val info = viewModel.lookupInfo.value
+        assertTrue(info != null)
+        assertEquals(listOf("你好", "喂"), info!!.entries[0].meanings)
+        assertFalse(viewModel.lookupInfoUnavailable.value)
+    }
+
+    @Test
+    fun `lookup info failure flips the unavailable flag without breaking lookup`() = runTest {
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("hello")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value is DictionaryUiState.Success)
+        assertTrue(viewModel.lookupInfoUnavailable.value)
     }
 }
