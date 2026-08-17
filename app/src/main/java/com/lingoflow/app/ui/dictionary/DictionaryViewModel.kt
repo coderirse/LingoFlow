@@ -2,8 +2,10 @@ package com.lingoflow.app.ui.dictionary
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lingoflow.app.data.dictionary.InflectionStemmer
 import com.lingoflow.app.data.tts.TtsEngine
 import com.lingoflow.app.domain.exception.DictionaryException
+import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
 import com.lingoflow.app.domain.repository.DictionaryRepository
 import com.lingoflow.app.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,18 +43,41 @@ class DictionaryViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = DictionaryUiState.Loading
-            dictionaryRepository.lookup(word.trim())
-                .onSuccess { entries ->
-                    _uiState.value = DictionaryUiState.Success(entries)
-                }
-                .onFailure { error ->
-                    _uiState.value = DictionaryUiState.Error(
-                        error as? DictionaryException
-                            ?: DictionaryException.Network(error)
-                    )
-                }
+            _uiState.value = lookUpWithInflectionFallback(word.trim().lowercase())
         }
     }
+
+    /**
+     * MW indexes headwords, not inflections: "served" comes back as a
+     * NotFound suggestion list. When that happens, retry with morphological
+     * stems (serve, …) and MW's own first suggestion before giving up.
+     */
+    private suspend fun lookUpWithInflectionFallback(word: String): DictionaryUiState {
+        val firstResult = dictionaryRepository.lookup(word)
+        firstResult.onSuccess { return DictionaryUiState.Success(it) }
+
+        val firstError = firstResult.exceptionOrNull()
+        if (firstError !is DictionaryException.NotFound) {
+            return errorState(firstError)
+        }
+
+        val retryCandidates = buildList {
+            addAll(InflectionStemmer.candidates(word))
+            firstError.suggestions.firstOrNull()?.let { add(it.lowercase()) }
+        }.distinct().filter { it != word }
+
+        for (candidate in retryCandidates) {
+            val retry = dictionaryRepository.lookup(candidate)
+            retry.onSuccess { return DictionaryUiState.Success(it) }
+        }
+        return errorState(firstError)
+    }
+
+    private fun errorState(error: Throwable?): DictionaryUiState.Error =
+        DictionaryUiState.Error(
+            error as? DictionaryException
+                ?: DictionaryException.Network(error)
+        )
 
     fun toggleFavorite(word: String) {
         viewModelScope.launch {

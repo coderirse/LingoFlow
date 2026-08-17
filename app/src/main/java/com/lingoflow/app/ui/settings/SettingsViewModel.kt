@@ -2,6 +2,7 @@ package com.lingoflow.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lingoflow.app.data.update.UpdateChecker
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.ProviderConfig
@@ -17,7 +18,8 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val updateChecker: UpdateChecker
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -83,6 +85,29 @@ class SettingsViewModel @Inject constructor(
     /** Called by the UI after the "Settings saved" Snackbar has been shown. */
     fun consumeSaveSuccess() {
         _uiState.update { it.copy(saveSuccess = false) }
+    }
+
+    /** Queries GitHub for the newest release and compares it to this build. */
+    fun checkForUpdates() {
+        if (_uiState.value.updateCheck == UpdateCheckState.Checking) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(updateCheck = UpdateCheckState.Checking) }
+            updateChecker.checkLatestRelease()
+                .onSuccess { release ->
+                    _uiState.update {
+                        it.copy(
+                            updateCheck = if (release.isNewerThanInstalled) {
+                                UpdateCheckState.Available(release)
+                            } else {
+                                UpdateCheckState.UpToDate
+                            }
+                        )
+                    }
+                }
+                .onFailure {
+                    _uiState.update { it.copy(updateCheck = UpdateCheckState.Failed) }
+                }
+        }
     }
 
     private fun mutateSettings(transform: (AppSettings) -> AppSettings) {

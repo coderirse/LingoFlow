@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -74,6 +75,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -250,6 +252,7 @@ private fun HomeTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -445,7 +448,12 @@ private fun InputCard(
                     }
                     // Voice input arrives in a later phase.
                     IconButton(onClick = {}, enabled = false) {
-                        Text("🎤")
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_mic),
+                            contentDescription = "Voice input (coming soon)",
+                            tint = LingoFlowOnSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                 }
             }
@@ -842,21 +850,27 @@ private fun ClickableWords(
     onWordClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Last tapped word stays highlighted (underline + brand color) as feedback.
+    var tappedWord by remember(text) { mutableStateOf<String?>(null) }
+
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start)
     ) {
         text.split(Regex("\\s+")).forEach { rawWord ->
             val cleanWord = rawWord.trim { !it.isLetterOrDigit() }.lowercase()
+            val isTapped = cleanWord.isNotEmpty() && cleanWord == tappedWord
             Text(
                 text = rawWord,
                 modifier = Modifier.clickable(enabled = cleanWord.isNotEmpty()) {
+                    tappedWord = cleanWord
                     onWordClick(cleanWord)
                 },
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
+                    lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5,
+                    textDecoration = if (isTapped) TextDecoration.Underline else null
                 ),
-                color = LingoFlowOnSurface
+                color = if (isTapped) LingoFlowPrimary else LingoFlowOnSurface
             )
         }
     }

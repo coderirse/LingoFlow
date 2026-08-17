@@ -31,14 +31,15 @@ class DictionaryViewModelTest {
     )
 
     private class FakeDictionaryRepository(
-        var result: Result<List<DictionaryEntry>>
+        var result: Result<List<DictionaryEntry>>,
+        var perWord: ((String) -> Result<List<DictionaryEntry>>)? = null
     ) : DictionaryRepository {
         var lookUpCount = 0
             private set
 
         override suspend fun lookup(word: String): Result<List<DictionaryEntry>> {
             lookUpCount++
-            return result
+            return perWord?.invoke(word) ?: result
         }
 
         override suspend fun search(word: String): Result<List<DictionaryEntry>> = lookup(word)
@@ -134,5 +135,40 @@ class DictionaryViewModelTest {
         viewModel.speak("hello")
 
         assertEquals(listOf("hello"), tts.spoken)
+    }
+
+    @Test
+    fun `inflected word falls back to its base form`() = runTest {
+        val repository = FakeDictionaryRepository(
+            result = Result.failure(DictionaryException.NotFound()),
+            perWord = { word ->
+                if (word == "serve") {
+                    Result.success(listOf(sampleEntry.copy(word = "serve")))
+                } else {
+                    Result.failure(DictionaryException.NotFound(listOf("serve")))
+                }
+            }
+        )
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("served")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state is DictionaryUiState.Success)
+        assertEquals("serve", (state as DictionaryUiState.Success).entries.single().word)
+    }
+
+    @Test
+    fun `unrecoverable not found keeps the error state`() = runTest {
+        val repository = FakeDictionaryRepository(
+            result = Result.failure(DictionaryException.NotFound())
+        )
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("zzzq")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value is DictionaryUiState.Error)
     }
 }

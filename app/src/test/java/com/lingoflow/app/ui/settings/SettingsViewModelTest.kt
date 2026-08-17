@@ -1,12 +1,14 @@
 package com.lingoflow.app.ui.settings
 
 import com.lingoflow.app.data.repository.FakeSettingsRepository
+import com.lingoflow.app.data.update.UpdateChecker
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,7 +24,7 @@ class SettingsViewModelTest {
 
     private fun createViewModel(
         repository: FakeSettingsRepository = FakeSettingsRepository()
-    ) = SettingsViewModel(repository) to repository
+    ) = SettingsViewModel(repository, UpdateChecker(OkHttpClient())) to repository
 
     @Test
     fun `loads default settings on init`() = runTest {

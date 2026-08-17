@@ -23,6 +23,7 @@ fun SettingsRoute(
         onDictionaryApiKeyChange = viewModel::updateDictionaryApiKey,
         onDefaultModeChange = viewModel::updateDefaultMode,
         onSaveClick = viewModel::saveSettings,
-        onSaveSuccessConsumed = viewModel::consumeSaveSuccess
+        onSaveSuccessConsumed = viewModel::consumeSaveSuccess,
+        onCheckUpdates = viewModel::checkForUpdates
     )
 }

@@ -86,12 +86,37 @@ class MlKitTranslator @Inject constructor() : Translator {
     private suspend fun resolveSourceLanguage(text: String, source: Language): Language {
         if (source != Language.AUTO) return source
 
-        val tag = languageIdentifier.identifyLanguage(text).await()
-        if (tag == UNDETERMINED_LANGUAGE_TAG) {
-            throw TranslationException("Unable to identify the source language.")
+        val tag = try {
+            languageIdentifier.identifyLanguage(text).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The on-device language-id module failed (e.g. not yet
+            // downloaded and no network). Guide the user instead of
+            // surfacing a raw ML Kit error.
+            throw TranslationException(
+                "Language detection is unavailable. Please select the source language manually."
+            )
         }
-        return Language.fromCode(tag)
-            ?: throw TranslationException("Detected language is not supported yet.")
+        if (tag != UNDETERMINED_LANGUAGE_TAG) {
+            return Language.fromCode(tag)
+                ?: throw TranslationException("Detected language is not supported yet.")
+        }
+
+        // identifyLanguage() gives up on short or ambiguous text ("und");
+        // fall back to the candidate list before erroring out.
+        val candidates = try {
+            languageIdentifier.identifyPossibleLanguages(text).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val best = candidates.maxByOrNull { it.confidence }?.languageTag
+        return best?.let(Language::fromCode)
+            ?: throw TranslationException(
+                "Couldn't detect the language. Please select it manually."
+            )
     }
 
     private fun getOrCreateClient(

@@ -117,6 +117,32 @@ class MwJsonParserTest {
     }
 
     @Test
+    fun `undecodable entries are skipped instead of failing the lookup`() {
+        val json = """
+            [
+              {"unexpected": "shape"},
+              {
+                "meta": {"id": "test:1", "stems": ["test"]},
+                "hwi": {"hw": "test"},
+                "fl": "noun",
+                "shortdef": ["a means of testing"]
+              }
+            ]
+        """.trimIndent()
+
+        val result = MwJsonParser.parse(json)
+        assertTrue(result.isSuccess)
+        assertEquals("test", result.getOrThrow().single().word)
+    }
+
+    @Test
+    fun `fully undecodable payload becomes ParseError`() {
+        val result = MwJsonParser.parse("""[{"unexpected": "shape"}]""")
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is DictionaryException.ParseError)
+    }
+
+    @Test
     fun `audio subdirectory rules are applied`() {
         fun audioOf(name: String): String? {
             val json = """

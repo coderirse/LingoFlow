@@ -1,5 +1,6 @@
 package com.lingoflow.app.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -40,11 +42,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.ui.theme.LingoFlowTheme
@@ -66,6 +70,7 @@ fun SettingsScreen(
     onDefaultModeChange: (TranslationMode) -> Unit,
     onSaveClick: () -> Unit,
     onSaveSuccessConsumed: () -> Unit,
+    onCheckUpdates: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -164,6 +169,19 @@ fun SettingsScreen(
             }
 
             item {
+                SettingsSection(title = "About") {
+                    Text(
+                        text = "Current version: ${com.lingoflow.app.BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    UpdateCheckRow(
+                        updateCheck = uiState.updateCheck,
+                        onCheckUpdates = onCheckUpdates
+                    )
+                }
+            }
+
+            item {
                 Button(
                     onClick = onSaveClick,
                     modifier = Modifier
@@ -201,6 +219,65 @@ private fun SettingsSection(
                 color = MaterialTheme.colorScheme.primary
             )
             content()
+        }
+    }
+}
+
+@Composable
+private fun UpdateCheckRow(
+    updateCheck: UpdateCheckState,
+    onCheckUpdates: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = onCheckUpdates,
+            enabled = updateCheck != UpdateCheckState.Checking,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                if (updateCheck == UpdateCheckState.Checking) {
+                    "Checking..."
+                } else {
+                    "Check for Updates"
+                }
+            )
+        }
+
+        when (updateCheck) {
+            is UpdateCheckState.UpToDate -> Text(
+                text = "You're on the latest version.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            is UpdateCheckState.Available -> {
+                Text(
+                    text = "New version available: ${updateCheck.release.tagName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                TextButton(
+                    onClick = {
+                        val url = updateCheck.release.apkDownloadUrl
+                            ?: updateCheck.release.htmlUrl
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, url.toUri())
+                        )
+                    }
+                ) {
+                    Text("Download ${updateCheck.release.tagName}")
+                }
+            }
+
+            is UpdateCheckState.Failed -> Text(
+                text = "Update check failed. Please try again later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+
+            else -> Unit
         }
     }
 }
@@ -355,7 +432,8 @@ private fun SettingsScreenPreview() {
             onDictionaryApiKeyChange = {},
             onDefaultModeChange = {},
             onSaveClick = {},
-            onSaveSuccessConsumed = {}
+            onSaveSuccessConsumed = {},
+            onCheckUpdates = {}
         )
     }
 }

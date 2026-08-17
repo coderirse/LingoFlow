@@ -52,21 +52,34 @@ object MwJsonParser {
             return Result.failure(DictionaryException.NotFound(suggestions))
         }
 
-        return try {
-            val dtos = json.decodeFromJsonElement<List<MwEntryDto>>(root)
-            Result.success(dtos.map { it.toDictionaryEntry() })
-        } catch (e: Exception) {
-            Result.failure(DictionaryException.ParseError(e))
+        // Decode entry-by-entry: MW occasionally ships homograph groups where
+        // a single entry has an unusual shape; skip those instead of failing
+        // the whole lookup.
+        val entries = array.mapNotNull { element ->
+            (element as? JsonObject)?.let { obj ->
+                runCatching {
+                    json.decodeFromJsonElement<MwEntryDto>(obj).toDictionaryEntry()
+                }.getOrNull()
+            }
+        }
+
+        return if (entries.isNotEmpty()) {
+            Result.success(entries)
+        } else {
+            Result.failure(
+                DictionaryException.ParseError(
+                    IllegalStateException("No decodable entries in payload")
+                )
+            )
         }
     }
 
     private fun MwEntryDto.toDictionaryEntry(): DictionaryEntry {
-        val headword = hwi.hw.replace("*", "")
         val definitions = parseDefinitions(def)
 
         return DictionaryEntry(
             word = meta.id.substringBefore(":"),
-            phonetics = hwi.prs.orEmpty().mapNotNull { prs ->
+            phonetics = hwi?.prs.orEmpty().mapNotNull { prs ->
                 prs.mw?.let {
                     Phonetic(text = it, audioUrl = prs.sound?.audio?.let(::audioUrl))
                 }

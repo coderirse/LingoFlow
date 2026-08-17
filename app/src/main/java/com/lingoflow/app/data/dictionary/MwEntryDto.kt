@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonElement
 @Serializable
 data class MwEntryDto(
     val meta: MetaDto,
-    val hwi: HwiDto,
+    val hwi: HwiDto? = null,
     val fl: String? = null,
     val def: List<DefDto>? = null,
     val dros: List<DroDto>? = null,
