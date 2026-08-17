@@ -32,6 +32,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
+import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.ui.i18n.LocalStrings
 
 /**
@@ -51,6 +52,8 @@ fun WordPreviewSheet(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val lookupInfo by viewModel.lookupInfo.collectAsStateWithLifecycle()
+    val lookupInfoUnavailable by viewModel.lookupInfoUnavailable.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
 
     LaunchedEffect(word) {
@@ -83,6 +86,8 @@ fun WordPreviewSheet(
                     WordPreviewContent(
                         word = entry.word,
                         entry = entry,
+                        lookupInfo = lookupInfo,
+                        lookupInfoUnavailable = lookupInfoUnavailable,
                         isFavorite = entry.word.trim().lowercase() in favorites,
                         ttsReady = viewModel.ttsReady,
                         onToggleFavorite = { viewModel.toggleFavorite(entry.word) },
@@ -109,6 +114,8 @@ fun WordPreviewSheet(
 private fun WordPreviewContent(
     word: String,
     entry: DictionaryEntry,
+    lookupInfo: WordLookupInfo?,
+    lookupInfoUnavailable: Boolean,
     isFavorite: Boolean,
     ttsReady: Boolean,
     onToggleFavorite: () -> Unit,
@@ -163,29 +170,42 @@ private fun WordPreviewContent(
         }
     }
 
-    val firstPos = entry.entries.firstOrNull()
-    firstPos?.let { posEntry ->
-        if (posEntry.partOfSpeech.isNotBlank()) {
-            Text(
-                text = posEntry.partOfSpeech,
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-        posEntry.definitions.firstOrNull()?.let { definition ->
-            Text(
-                text = definition.meaning,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            definition.examples.firstOrNull()?.let { example ->
+    if (lookupInfo != null) {
+        // LLM-produced Chinese glosses, Youdao-style.
+        WordLookupInfoContent(info = lookupInfo)
+    } else {
+        // Fallback: Merriam-Webster English entry.
+        val firstPos = entry.entries.firstOrNull()
+        firstPos?.let { posEntry ->
+            if (posEntry.partOfSpeech.isNotBlank()) {
                 Text(
-                    text = example.sentence,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = posEntry.partOfSpeech,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontStyle = FontStyle.Italic,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
+            posEntry.definitions.firstOrNull()?.let { definition ->
+                Text(
+                    text = definition.meaning,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                definition.examples.firstOrNull()?.let { example ->
+                    Text(
+                        text = example.sentence,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontStyle = FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (lookupInfoUnavailable) {
+            Text(
+                text = strings.chineseMeaningUnavailable,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 

@@ -7,6 +7,7 @@ import com.lingoflow.app.domain.Translator
 import com.lingoflow.app.domain.engine.MlKitTranslationEngine
 import com.lingoflow.app.domain.engine.TranslationEngine
 import com.lingoflow.app.domain.repository.SettingsRepository
+import com.lingoflow.app.domain.usecase.LookupWordUseCase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -40,4 +41,14 @@ object EngineModule {
         llmEngine: LlmTranslationEngine,
         settingsRepository: SettingsRepository
     ): TranslationEngine = TranslationRouter(mlKitEngine, llmEngine, settingsRepository)
+
+    @Provides
+    @Singleton
+    fun provideLookupWordUseCase(
+        client: OkHttpClient,
+        settingsRepository: SettingsRepository
+    ): LookupWordUseCase = LookupWordUseCase(
+        settingsRepository = settingsRepository,
+        providerFactory = { config -> OpenAiCompatibleProvider(client, config) }
+    )
 }
