@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,22 @@ plugins {
     alias(libs.plugins.hilt)
     kotlin("plugin.serialization") version "2.2.10"
 }
+
+// Release signing only (R8 stays OFF). Passwords come from gitignored
+// local.properties or environment variables; falls back to debug signing
+// when unconfigured (e.g. CI without secrets).
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        load(localFile.inputStream())
+    }
+}
+val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+    ?: System.getenv("LINGOFLOW_STORE_PASSWORD")
+val releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+    ?: System.getenv("LINGOFLOW_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.lingoflow.app"
@@ -16,15 +34,28 @@ android {
         applicationId = "com.lingoflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.1.2"
+        versionCode = 6
+        versionName = "1.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("lingoflow-release.jks")
+            storePassword = releaseStorePassword ?: ""
+            keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS") ?: "lingoflow"
+            keyPassword = releaseKeyPassword ?: ""
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
