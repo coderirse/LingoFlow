@@ -11,6 +11,13 @@ val LingoFlowSurfaceElevated = Color(0xFF2C2C2E)
 val LingoFlowOnSurface = Color(0xFFFFFFFF)
 val LingoFlowOnSurfaceVariant = Color(0xFF8E8E93)
 
+// Light theme palette
+val LingoFlowLightBackground = Color(0xFFF7F8FA)
+val LingoFlowLightSurface = Color(0xFFFFFFFF)
+val LingoFlowLightSurfaceElevated = Color(0xFFFFFFFF)
+val LingoFlowLightOnSurface = Color(0xFF1C1C1E)
+val LingoFlowLightOnSurfaceVariant = Color(0xFF6E6E73)
+
 // Light theme fallbacks
 val Purple80 = Color(0xFFD0BCFF)
 val PurpleGrey80 = Color(0xFFCCC2DC)

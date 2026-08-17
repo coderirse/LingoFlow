@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -301,5 +302,108 @@ class HomeViewModelTest {
         bundle.viewModel.onSpeakClick()
 
         assertEquals(listOf("你好"), bundle.tts.spoken)
+    }
+
+    /** Engine that streams scripted deltas, optionally stalling mid-stream. */
+    private class FakeStreamingEngine(
+        private val deltas: List<String>,
+        private val stallAfterFirst: Boolean = false
+    ) : TranslationEngine,
+        com.lingoflow.app.domain.engine.StreamingTranslationEngine {
+        override val status: StateFlow<TranslationStatus> =
+            MutableStateFlow(TranslationStatus.IDLE)
+
+        override suspend fun translate(
+            request: TranslationRequest
+        ): Result<TranslationResponse> =
+            Result.success(TranslationResponse.Standard(deltas.joinToString("")))
+
+        override fun translateStream(
+            request: TranslationRequest
+        ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
+            deltas.forEachIndexed { index, delta ->
+                emit(delta)
+                if (stallAfterFirst && index == 0) {
+                    kotlinx.coroutines.delay(60_000)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `llm mode streams deltas then finalizes with history`() = runTest {
+        val bundle = createViewModel(engine = FakeStreamingEngine(listOf("你", "好")))
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onModeChange(TranslationMode.NATURAL)
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isStreaming)
+        assertTrue(state.translationResponse is TranslationResponse.Standard)
+        assertEquals("你好", state.translatedText)
+        assertEquals("你好", bundle.history.getAllHistory().first().single().translatedText)
+    }
+
+    @Test
+    fun `cancelling a stream keeps partial text and skips history`() = runTest {
+        val bundle = createViewModel(
+            engine = FakeStreamingEngine(listOf("你", "好"), stallAfterFirst = true)
+        )
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onModeChange(TranslationMode.NATURAL)
+        bundle.viewModel.onTranslateClick()
+        // Run only tasks scheduled at the current virtual time: the first
+        // delta arrives, then the stream stalls on its delay.
+        runCurrent()
+
+        assertTrue(bundle.viewModel.uiState.value.isStreaming)
+        assertEquals("你", bundle.viewModel.uiState.value.streamingText)
+
+        bundle.viewModel.onCancelStreaming()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isStreaming)
+        assertFalse(state.isTranslating)
+        assertTrue(bundle.history.getAllHistory().first().isEmpty())
+    }
+
+    @Test
+    fun `stream failure surfaces a friendly error`() = runTest {
+        val engine = object : TranslationEngine,
+            com.lingoflow.app.domain.engine.StreamingTranslationEngine {
+            override val status: StateFlow<TranslationStatus> =
+                MutableStateFlow(TranslationStatus.IDLE)
+
+            override suspend fun translate(
+                request: TranslationRequest
+            ): Result<TranslationResponse> = Result.failure(
+                com.lingoflow.app.domain.model.TranslationException("boom")
+            )
+
+            override fun translateStream(
+                request: TranslationRequest
+            ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
+                throw com.lingoflow.app.domain.model.TranslationException(
+                    "Network error. Please check your connection."
+                )
+            }
+        }
+        val bundle = createViewModel(engine = engine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onModeChange(TranslationMode.FORMAL)
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isStreaming)
+        assertEquals("Network error. Please check your connection.", state.errorMessage)
     }
 }

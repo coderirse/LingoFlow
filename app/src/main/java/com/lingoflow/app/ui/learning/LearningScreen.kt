@@ -34,10 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
-import com.lingoflow.app.ui.theme.LingoFlowOnSurface
-import com.lingoflow.app.ui.theme.LingoFlowOnSurfaceVariant
+import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.theme.LingoFlowSecondary
-import com.lingoflow.app.ui.theme.LingoFlowSurface
 
 /** Real Learning tab: the user's favorite dictionary words. */
 @Composable
@@ -62,6 +60,7 @@ fun LearningScreen(
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalStrings.current
     var lookupWord by remember { mutableStateOf<String?>(null) }
 
     if (words.isEmpty()) {
@@ -73,14 +72,14 @@ fun LearningScreen(
             Icon(
                 imageVector = Icons.Default.FavoriteBorder,
                 contentDescription = null,
-                tint = LingoFlowOnSurfaceVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(48.dp)
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "No favorite words yet.\nLook up a word and tap the heart!",
+                text = strings.noFavoriteWords,
                 style = MaterialTheme.typography.titleMedium,
-                color = LingoFlowOnSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     } else {
@@ -95,7 +94,7 @@ fun LearningScreen(
                         .fillMaxWidth()
                         .clickable { lookupWord = word },
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = LingoFlowSurface)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
                         modifier = Modifier
@@ -108,12 +107,12 @@ fun LearningScreen(
                             text = word,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
-                            color = LingoFlowOnSurface
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         IconButton(onClick = { onRemove(word) }) {
                             Icon(
                                 imageVector = Icons.Default.Favorite,
-                                contentDescription = "Remove from favorites",
+                                contentDescription = strings.removeFromFavorites,
                                 tint = LingoFlowSecondary
                             )
                         }

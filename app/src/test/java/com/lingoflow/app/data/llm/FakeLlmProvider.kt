@@ -13,7 +13,8 @@ class FakeLlmProvider(
         finishReason = "stop",
         usage = null
     ),
-    var chatError: Throwable? = null
+    var chatError: Throwable? = null,
+    var streamFlow: Flow<String> = emptyFlow()
 ) : LlmProvider {
 
     override val id: String = "fake"
@@ -30,5 +31,9 @@ class FakeLlmProvider(
         return chatResult
     }
 
-    override suspend fun chatStream(request: ChatRequest): Flow<String> = emptyFlow()
+    override suspend fun chatStream(request: ChatRequest): Flow<String> {
+        lastRequest = request
+        chatError?.let { throw it }
+        return streamFlow
+    }
 }

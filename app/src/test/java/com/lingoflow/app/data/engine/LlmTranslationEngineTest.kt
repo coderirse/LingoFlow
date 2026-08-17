@@ -3,6 +3,7 @@ package com.lingoflow.app.data.engine
 import com.lingoflow.app.data.llm.FakeLlmProvider
 import com.lingoflow.app.data.repository.FakeSettingsRepository
 import com.lingoflow.app.domain.model.Language
+import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.llm.ChatResponse
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppSettings
@@ -10,9 +11,12 @@ import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class LlmTranslationEngineTest {
@@ -111,5 +115,67 @@ class LlmTranslationEngineTest {
 
         assertTrue(result.isSuccess)
         assertTrue(result.getOrThrow() is TranslationResponse.Standard)
+    }
+}
+
+class LlmTranslationEngineStreamTest {
+
+    private fun settingsWithKey(apiKey: String) = FakeSettingsRepository(
+        AppSettings(
+            activeLlmProviderId = LlmProviderId.DEEPSEEK,
+            llmProviders = mapOf(
+                LlmProviderId.DEEPSEEK to ProviderConfig(
+                    providerId = LlmProviderId.DEEPSEEK,
+                    apiKey = apiKey,
+                    baseUrl = null,
+                    model = "deepseek-chat"
+                )
+            ),
+            dictionaryApiKey = ""
+        )
+    )
+
+    private fun request(mode: TranslationMode) = TranslationRequest(
+        text = "Hello",
+        sourceLanguage = Language.ENGLISH,
+        targetLanguage = Language.CHINESE,
+        mode = mode
+    )
+
+    @Test
+    fun `stream emits deltas in order`() = runTest {
+        val provider = FakeLlmProvider(streamFlow = flowOf("你", "好", "呀"))
+        val engine = LlmTranslationEngine(settingsWithKey("sk-test")) { provider }
+
+        val deltas = engine.translateStream(request(TranslationMode.NATURAL)).toList()
+
+        assertEquals(listOf("你", "好", "呀"), deltas)
+        assertTrue(provider.lastRequest!!.messages.first().content.contains("naturally"))
+    }
+
+    @Test
+    fun `stream without api key throws a friendly error`() = runTest {
+        val provider = FakeLlmProvider()
+        val engine = LlmTranslationEngine(settingsWithKey("")) { provider }
+
+        try {
+            engine.translateStream(request(TranslationMode.NATURAL)).toList()
+            fail("Expected TranslationException")
+        } catch (e: TranslationException) {
+            assertEquals("LLM API key is not configured.", e.userMessage)
+        }
+    }
+
+    @Test
+    fun `standard mode stream is rejected`() = runTest {
+        val provider = FakeLlmProvider()
+        val engine = LlmTranslationEngine(settingsWithKey("sk-test")) { provider }
+
+        try {
+            engine.translateStream(request(TranslationMode.STANDARD)).toList()
+            fail("Expected IllegalArgumentException")
+        } catch (e: IllegalArgumentException) {
+            // expected: STANDARD stays on the non-streaming path
+        }
     }
 }

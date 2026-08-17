@@ -1,5 +1,6 @@
 package com.lingoflow.app.di
 
+import com.lingoflow.app.data.dictionary.CachedDictionaryRepository
 import com.lingoflow.app.data.dictionary.DictionaryRepositoryImpl
 import com.lingoflow.app.domain.repository.DictionaryRepository
 import com.lingoflow.app.domain.repository.SettingsRepository
@@ -20,8 +21,14 @@ object DictionaryModule {
 
     @Provides
     @Singleton
-    fun provideDictionaryRepository(
+    fun provideDictionaryRepositoryImpl(
         client: OkHttpClient,
         settingsRepository: SettingsRepository
-    ): DictionaryRepository = DictionaryRepositoryImpl(client, settingsRepository)
+    ): DictionaryRepositoryImpl = DictionaryRepositoryImpl(client, settingsRepository)
+
+    @Provides
+    @Singleton
+    fun provideDictionaryRepository(
+        impl: DictionaryRepositoryImpl
+    ): DictionaryRepository = CachedDictionaryRepository(impl)
 }

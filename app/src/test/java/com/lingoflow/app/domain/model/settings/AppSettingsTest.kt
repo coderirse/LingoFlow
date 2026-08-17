@@ -48,3 +48,31 @@ class AppSettingsTest {
         assertEquals(TranslationMode.LEARNING, settings.defaultTranslationMode)
     }
 }
+
+class AppSettingsAppearanceTest {
+
+    @Test
+    fun `theme and language default to system and english`() {
+        val settings = AppSettings(
+            activeLlmProviderId = LlmProviderId.DEEPSEEK,
+            llmProviders = emptyMap(),
+            dictionaryApiKey = ""
+        )
+        assertEquals(ThemeMode.SYSTEM, settings.themeMode)
+        assertEquals(AppLanguage.ENGLISH, settings.appLanguage)
+    }
+
+    @Test
+    fun `theme and language survive copy`() {
+        val settings = AppSettings(
+            activeLlmProviderId = LlmProviderId.DEEPSEEK,
+            llmProviders = emptyMap(),
+            dictionaryApiKey = "",
+            themeMode = ThemeMode.DARK,
+            appLanguage = AppLanguage.CHINESE
+        )
+        val copied = settings.copy(dictionaryApiKey = "x")
+        assertEquals(ThemeMode.DARK, copied.themeMode)
+        assertEquals(AppLanguage.CHINESE, copied.appLanguage)
+    }
+}
