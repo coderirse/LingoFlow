@@ -28,3 +28,13 @@ enum class Language(val displayName: String, val code: String?) {
         }
     }
 }
+
+/** BCP-47 tag used for Text-to-Speech output. */
+val Language.ttsTag: String?
+    get() = when (this) {
+        Language.AUTO -> null
+        Language.ENGLISH -> "en-US"
+        Language.CHINESE -> "zh-CN"
+        Language.JAPANESE -> "ja-JP"
+        Language.KOREAN -> "ko-KR"
+    }

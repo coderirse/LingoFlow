@@ -2,12 +2,16 @@ package com.lingoflow.app.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lingoflow.app.data.tts.TtsEngine
 import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.TranslationStatus
+import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
+import com.lingoflow.app.domain.model.ttsTag
+import com.lingoflow.app.domain.repository.HistoryRepository
 import com.lingoflow.app.domain.repository.SettingsRepository
 import com.lingoflow.app.domain.usecase.TranslateTextUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,7 +34,13 @@ data class HomeUiState(
     val errorMessage: String? = null,
     val snackbarMessage: String? = null,
     /** Word tapped in the translation result; triggers dictionary lookup. */
-    val lookupWord: String? = null
+    val lookupWord: String? = null,
+    /** History record id of the current translation, for the favorite toggle. */
+    val currentHistoryId: String? = null,
+    /** Whether the current translation record is favorited. */
+    val isCurrentFavorite: Boolean = false,
+    /** Whether text-to-speech is ready on this device. */
+    val ttsReady: Boolean = false
 ) {
     /** Convenience accessor for copy/share regardless of response type. */
     val translatedText: String
@@ -44,13 +54,16 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val translateText: TranslateTextUseCase,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val historyRepository: HistoryRepository,
+    private val ttsEngine: TtsEngine
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
+        _uiState.update { it.copy(ttsReady = ttsEngine.isReady) }
         viewModelScope.launch {
             val settings = settingsRepository.getSettings()
             _uiState.update { it.copy(translationMode = settings.defaultTranslationMode) }
@@ -117,11 +130,25 @@ class HomeViewModel @Inject constructor(
                     mode = snapshot.translationMode
                 )
             ).onSuccess { response ->
+                val historyItem = TranslationHistoryItem(
+                    sourceText = snapshot.inputText,
+                    translatedText = when (response) {
+                        is TranslationResponse.Standard -> response.translatedText
+                        is TranslationResponse.Learning -> response.translatedText
+                    },
+                    sourceLanguage = snapshot.sourceLanguage,
+                    targetLanguage = snapshot.targetLanguage,
+                    mode = snapshot.translationMode
+                )
+                historyRepository.addHistory(historyItem)
                 _uiState.update {
                     it.copy(
                         isTranslating = false,
                         translationResponse = response,
-                        errorMessage = null
+                        errorMessage = null,
+                        currentHistoryId = historyItem.id,
+                        isCurrentFavorite = false,
+                        ttsReady = ttsEngine.isReady
                     )
                 }
             }.onFailure { error ->
@@ -139,12 +166,42 @@ class HomeViewModel @Inject constructor(
 
     fun onClearInput() {
         _uiState.update {
-            it.copy(inputText = "", translationResponse = null, errorMessage = null)
+            it.copy(
+                inputText = "",
+                translationResponse = null,
+                errorMessage = null,
+                currentHistoryId = null,
+                isCurrentFavorite = false
+            )
+        }
+    }
+
+    /** Speaks the current translation in the target language. */
+    fun onSpeakClick() {
+        val state = _uiState.value
+        val text = state.translatedText
+        if (text.isBlank()) return
+        ttsEngine.speak(text, state.targetLanguage.ttsTag ?: "en-US")
+    }
+
+    /** Toggles the favorite flag on the current translation record. */
+    fun onToggleFavoriteTranslation() {
+        val historyId = _uiState.value.currentHistoryId ?: return
+        viewModelScope.launch {
+            historyRepository.toggleFavorite(historyId)
+            _uiState.update { it.copy(isCurrentFavorite = !it.isCurrentFavorite) }
         }
     }
 
     fun onClearResult() {
-        _uiState.update { it.copy(translationResponse = null, errorMessage = null) }
+        _uiState.update {
+            it.copy(
+                translationResponse = null,
+                errorMessage = null,
+                currentHistoryId = null,
+                isCurrentFavorite = false
+            )
+        }
     }
 
     /** Called by the UI after the transient snackbar has been shown. */

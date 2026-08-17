@@ -24,9 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -51,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.translation.TranslationMode
+import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.theme.LingoFlowTheme
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -386,22 +384,33 @@ private fun TranslationModeSelector(
     selected: TranslationMode,
     onSelected: (TranslationMode) -> Unit
 ) {
-    val modes = TranslationMode.entries
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        modes.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = mode == selected,
-                onClick = { onSelected(mode) },
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = modes.size
-                )
-            ) {
-                Text(
-                    text = mode.name.lowercase()
-                        .replaceFirstChar { it.uppercase(Locale.US) },
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = selected.displayName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Default Translation Mode") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            TranslationMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.displayName) },
+                    onClick = {
+                        onSelected(mode)
+                        expanded = false
+                    }
                 )
             }
         }

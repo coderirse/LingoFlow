@@ -29,7 +29,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
@@ -37,7 +36,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,7 +67,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -87,7 +84,10 @@ import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationStatus
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationResponse
+import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
+import com.lingoflow.app.ui.history.HistoryRoute
+import com.lingoflow.app.ui.learning.LearningRoute
 import com.lingoflow.app.ui.theme.LingoFlowOnSurface
 import com.lingoflow.app.ui.theme.LingoFlowOnSurfaceVariant
 import com.lingoflow.app.ui.theme.LingoFlowPrimary
@@ -116,6 +116,8 @@ fun HomeRoute(
         onSnackbarShown = viewModel::onSnackbarShown,
         onWordClick = viewModel::onWordClick,
         onLookupWordConsumed = viewModel::consumeLookupWord,
+        onSpeakClick = viewModel::onSpeakClick,
+        onToggleFavoriteTranslation = viewModel::onToggleFavoriteTranslation,
         onSettingsClick = onNavigateToSettings
     )
 }
@@ -133,6 +135,8 @@ fun HomeScreen(
     onSnackbarShown: () -> Unit,
     onWordClick: (String) -> Unit,
     onLookupWordConsumed: () -> Unit,
+    onSpeakClick: () -> Unit,
+    onToggleFavoriteTranslation: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -214,6 +218,8 @@ fun HomeScreen(
                     }
                 },
                 onWordClick = onWordClick,
+                onSpeakClick = onSpeakClick,
+                onToggleFavoriteTranslation = onToggleFavoriteTranslation,
                 onGoToSettings = onSettingsClick,
                 modifier = Modifier
                     .fillMaxSize()
@@ -221,15 +227,16 @@ fun HomeScreen(
                     .imePadding()
             )
 
-            1 -> PlaceholderScreen(
-                title = "History",
-                icon = Icons.Default.DateRange,
+            1 -> HistoryRoute(
+                onReuse = { text ->
+                    onInputChange(text)
+                    selectedTab = 0
+                },
                 modifier = Modifier.padding(innerPadding)
             )
 
-            else -> PlaceholderScreen(
-                title = "Learning",
-                icon = Icons.Default.Star,
+            else -> LearningRoute(
+                onGoToSettings = onSettingsClick,
                 modifier = Modifier.padding(innerPadding)
             )
         }
@@ -333,6 +340,8 @@ private fun TranslateTab(
     onShare: () -> Unit,
     onPaste: () -> Unit,
     onWordClick: (String) -> Unit,
+    onSpeakClick: () -> Unit,
+    onToggleFavoriteTranslation: () -> Unit,
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -381,7 +390,9 @@ private fun TranslateTab(
                 uiState = uiState,
                 onCopy = onCopy,
                 onShare = onShare,
-                onWordClick = onWordClick
+                onWordClick = onWordClick,
+                onSpeakClick = onSpeakClick,
+                onToggleFavorite = onToggleFavoriteTranslation
             )
         }
         item {
@@ -600,15 +611,6 @@ private fun ModeCard(
     }
 }
 
-private val TranslationMode.displayName: String
-    get() = when (this) {
-        TranslationMode.STANDARD -> "Standard"
-        TranslationMode.NATURAL -> "Natural"
-        TranslationMode.CONCISE -> "Concise"
-        TranslationMode.FORMAL -> "Formal"
-        TranslationMode.LEARNING -> "Learning"
-    }
-
 @Composable
 private fun TranslateButton(
     uiState: HomeUiState,
@@ -647,9 +649,10 @@ private fun TranslationResultCard(
     uiState: HomeUiState,
     onCopy: () -> Unit,
     onShare: () -> Unit,
-    onWordClick: (String) -> Unit
+    onWordClick: (String) -> Unit,
+    onSpeakClick: () -> Unit,
+    onToggleFavorite: () -> Unit
 ) {
-    var isFavorite by remember { mutableStateOf(false) }
     val response = uiState.translationResponse
     val hasResult = uiState.translatedText.isNotEmpty()
 
@@ -670,11 +673,18 @@ private fun TranslationResultCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = LingoFlowPrimary
                 )
-                // TTS playback arrives in a later phase.
-                IconButton(onClick = {}, enabled = false) {
+                IconButton(
+                    onClick = onSpeakClick,
+                    enabled = uiState.ttsReady && hasResult
+                ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Speak (coming soon)"
+                        contentDescription = "Speak translation",
+                        tint = if (uiState.ttsReady && hasResult) {
+                            LingoFlowPrimary
+                        } else {
+                            LingoFlowOnSurfaceVariant
+                        }
                     )
                 }
             }
@@ -817,16 +827,19 @@ private fun TranslationResultCard(
                             tint = LingoFlowOnSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { isFavorite = !isFavorite }) {
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        enabled = uiState.currentHistoryId != null
+                    ) {
                         Icon(
-                            imageVector = if (isFavorite) {
+                            imageVector = if (uiState.isCurrentFavorite) {
                                 Icons.Default.Favorite
                             } else {
                                 Icons.Default.FavoriteBorder
                             },
-                            contentDescription = "Favorite",
-                            tint = if (isFavorite) {
-                                LingoFlowPrimary
+                            contentDescription = "Favorite translation",
+                            tint = if (uiState.isCurrentFavorite) {
+                                LingoFlowSecondary
                             } else {
                                 LingoFlowOnSurfaceVariant
                             }
@@ -982,36 +995,6 @@ private fun BrandingFooter(modifier: Modifier = Modifier) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Placeholder tabs
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun PlaceholderScreen(
-    title: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = LingoFlowOnSurfaceVariant,
-            modifier = Modifier.size(48.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "$title — Coming Soon",
-            style = MaterialTheme.typography.titleMedium,
-            color = LingoFlowOnSurfaceVariant
-        )
-    }
-}
-
 @Preview(showBackground = true)
 @Composable
 private fun HomeScreenPreview() {
@@ -1030,6 +1013,8 @@ private fun HomeScreenPreview() {
             onSnackbarShown = {},
             onWordClick = {},
             onLookupWordConsumed = {},
+            onSpeakClick = {},
+            onToggleFavoriteTranslation = {},
             onSettingsClick = {}
         )
     }

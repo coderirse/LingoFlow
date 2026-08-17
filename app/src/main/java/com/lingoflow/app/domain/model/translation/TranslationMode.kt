@@ -17,3 +17,13 @@ enum class TranslationMode {
     /** Translation plus dictionary entries and in-context explanation. */
     LEARNING
 }
+
+/** User-facing label for mode pickers and history chips. */
+val TranslationMode.displayName: String
+    get() = when (this) {
+        TranslationMode.STANDARD -> "Standard"
+        TranslationMode.NATURAL -> "Natural"
+        TranslationMode.CONCISE -> "Concise"
+        TranslationMode.FORMAL -> "Formal"
+        TranslationMode.LEARNING -> "Learning"
+    }
