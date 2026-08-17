@@ -48,7 +48,9 @@ data class HomeUiState(
     /** Text received so far during a streaming translation. */
     val streamingText: String = "",
     /** Chinese dictionary info for single-word English→Chinese translations. */
-    val wordLookup: WordLookupInfo? = null
+    val wordLookup: WordLookupInfo? = null,
+    /** True while the LLM dictionary block is being fetched. */
+    val wordLookupLoading: Boolean = false
 ) {
     /** Convenience accessor for copy/share regardless of response type. */
     val translatedText: String
@@ -250,7 +252,8 @@ class HomeViewModel @Inject constructor(
                 currentHistoryId = historyItem.id,
                 isCurrentFavorite = false,
                 ttsReady = ttsEngine.isReady,
-                wordLookup = null
+                wordLookup = null,
+                wordLookupLoading = false
             )
         }
         maybeLoadWordLookup(snapshot)
@@ -269,11 +272,13 @@ class HomeViewModel @Inject constructor(
         if (!eligible) return
 
         viewModelScope.launch {
+            _uiState.update { it.copy(wordLookupLoading = true) }
             lookupWordUseCase(word.lowercase())
                 .onSuccess { info ->
                     _uiState.update { it.copy(wordLookup = info) }
                 }
             // Failure: silently keep the plain ML Kit translation only.
+            _uiState.update { it.copy(wordLookupLoading = false) }
         }
     }
 

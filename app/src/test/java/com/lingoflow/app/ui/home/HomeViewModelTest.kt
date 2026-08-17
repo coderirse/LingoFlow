@@ -463,4 +463,16 @@ class HomeViewModelTest {
 
         assertNull(bundle.viewModel.uiState.value.wordLookup)
     }
+    @Test
+    fun `word lookup loading flag settles after completion`() = runTest {
+        val bundle = createViewModel()
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("consider")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        assertFalse(bundle.viewModel.uiState.value.wordLookupLoading)
+        assertNull(bundle.viewModel.uiState.value.wordLookup)
+    }
 }

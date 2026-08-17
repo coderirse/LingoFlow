@@ -2,12 +2,6 @@ package com.lingoflow.app.ui.home
 
 import android.content.ClipData
 import android.content.Intent
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +87,7 @@ import com.lingoflow.app.domain.model.TranslationStatus
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.translation.displayName
+import com.lingoflow.app.ui.components.BlinkingCursor
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
 import com.lingoflow.app.ui.dictionary.WordLookupInfoContent
 import com.lingoflow.app.ui.dictionary.WordPreviewSheet
@@ -856,6 +851,10 @@ private fun TranslationResultCard(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                        if (uiState.wordLookup == null && uiState.wordLookupLoading) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            BlinkingCursor()
+                        }
                         // Youdao-style Chinese dictionary block for single words.
                         uiState.wordLookup?.let { info ->
                             Spacer(modifier = Modifier.height(12.dp))
@@ -973,17 +972,6 @@ private fun StreamingText(
     text: String,
     modifier: Modifier = Modifier
 ) {
-    val transition = rememberInfiniteTransition(label = "cursor")
-    val cursorAlpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "cursorAlpha"
-    )
-
     Row(modifier = modifier.fillMaxWidth()) {
         Text(
             text = text.ifEmpty { " " },
@@ -993,12 +981,7 @@ private fun StreamingText(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f, fill = false)
         )
-        Text(
-            text = "▌",
-            style = MaterialTheme.typography.bodyLarge,
-            color = LingoFlowPrimary,
-            modifier = Modifier.alpha(cursorAlpha)
-        )
+        BlinkingCursor()
     }
 }
 

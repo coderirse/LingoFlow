@@ -39,6 +39,10 @@ class DictionaryViewModel @Inject constructor(
     private val _lookupInfoUnavailable = MutableStateFlow(false)
     val lookupInfoUnavailable: StateFlow<Boolean> = _lookupInfoUnavailable.asStateFlow()
 
+    /** True while the LLM Chinese glosses are being fetched. */
+    private val _lookupInfoLoading = MutableStateFlow(false)
+    val lookupInfoLoading: StateFlow<Boolean> = _lookupInfoLoading.asStateFlow()
+
     /** Current set of favorited words, for the favorite toggle. */
     val favorites: StateFlow<Set<String>> = favoritesRepository.getFavorites()
         .stateIn(
@@ -60,10 +64,12 @@ class DictionaryViewModel @Inject constructor(
         // and the UI falls back to the Merriam-Webster English entry.
         _lookupInfo.value = null
         _lookupInfoUnavailable.value = false
+        _lookupInfoLoading.value = true
         viewModelScope.launch {
             lookupWordUseCase(word.trim().lowercase())
                 .onSuccess { _lookupInfo.value = it }
                 .onFailure { _lookupInfoUnavailable.value = true }
+            _lookupInfoLoading.value = false
         }
     }
 

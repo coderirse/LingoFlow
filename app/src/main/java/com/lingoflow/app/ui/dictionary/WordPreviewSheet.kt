@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
 import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
+import com.lingoflow.app.ui.components.BlinkingCursor
 import com.lingoflow.app.ui.i18n.LocalStrings
 
 /**
@@ -54,6 +55,7 @@ fun WordPreviewSheet(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val lookupInfo by viewModel.lookupInfo.collectAsStateWithLifecycle()
     val lookupInfoUnavailable by viewModel.lookupInfoUnavailable.collectAsStateWithLifecycle()
+    val lookupInfoLoading by viewModel.lookupInfoLoading.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
 
     LaunchedEffect(word) {
@@ -88,6 +90,7 @@ fun WordPreviewSheet(
                         entry = entry,
                         lookupInfo = lookupInfo,
                         lookupInfoUnavailable = lookupInfoUnavailable,
+                        lookupInfoLoading = lookupInfoLoading,
                         isFavorite = entry.word.trim().lowercase() in favorites,
                         ttsReady = viewModel.ttsReady,
                         onToggleFavorite = { viewModel.toggleFavorite(entry.word) },
@@ -116,6 +119,7 @@ private fun WordPreviewContent(
     entry: DictionaryEntry,
     lookupInfo: WordLookupInfo?,
     lookupInfoUnavailable: Boolean,
+    lookupInfoLoading: Boolean,
     isFavorite: Boolean,
     ttsReady: Boolean,
     onToggleFavorite: () -> Unit,
@@ -173,6 +177,9 @@ private fun WordPreviewContent(
     if (lookupInfo != null) {
         // LLM-produced Chinese glosses, Youdao-style.
         WordLookupInfoContent(info = lookupInfo)
+    } else if (lookupInfoLoading) {
+        // MW result is already on screen; the Chinese glosses are on the way.
+        BlinkingCursor()
     } else {
         // Fallback: Merriam-Webster English entry.
         val firstPos = entry.entries.firstOrNull()
