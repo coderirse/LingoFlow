@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,6 +7,22 @@ plugins {
     alias(libs.plugins.hilt)
     kotlin("plugin.serialization") version "2.2.10"
 }
+
+// Release signing: passwords never hardcoded — read from local.properties
+// (gitignored) first, then environment variables. Falls back to debug
+// signing when neither is configured (e.g. CI without secrets).
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        load(localFile.inputStream())
+    }
+}
+val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+    ?: System.getenv("LINGOFLOW_STORE_PASSWORD")
+val releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+    ?: System.getenv("LINGOFLOW_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.lingoflow.app"
@@ -22,15 +40,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("lingoflow-release.jks")
+            storePassword = releaseStorePassword ?: ""
+            keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS") ?: "lingoflow"
+            keyPassword = releaseKeyPassword ?: ""
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = false // conservative: enable after full regression
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            optimization {
-                enable = false
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }
