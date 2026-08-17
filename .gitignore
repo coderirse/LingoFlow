@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+build/
+*/build/
+!gradle-wrapper.jar
+gradle-app.setting
+
+# Local configuration
+local.properties
+*.iml
+.idea/
+*.ipr
+*.iws
+.DS_Store
+
+# Android
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Keystore
+*.jks
+*.keystore
+
+# OS
+Thumbs.db
+
+# Local design assets (icon source, device screenshots)
+image.jpg
+screenshot/

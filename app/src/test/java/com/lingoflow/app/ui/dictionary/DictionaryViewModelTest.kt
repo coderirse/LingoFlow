@@ -1,0 +1,138 @@
+package com.lingoflow.app.ui.dictionary
+
+import com.lingoflow.app.data.repository.FakeFavoritesRepository
+import com.lingoflow.app.data.tts.FakeTtsEngine
+import com.lingoflow.app.domain.exception.DictionaryException
+import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
+import com.lingoflow.app.domain.repository.DictionaryRepository
+import com.lingoflow.app.util.MainDispatcherRule
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class DictionaryViewModelTest {
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
+    private val sampleEntry = DictionaryEntry(
+        word = "hello",
+        phonetics = emptyList(),
+        entries = emptyList(),
+        phrases = emptyList(),
+        etymology = null
+    )
+
+    private class FakeDictionaryRepository(
+        var result: Result<List<DictionaryEntry>>
+    ) : DictionaryRepository {
+        var lookUpCount = 0
+            private set
+
+        override suspend fun lookup(word: String): Result<List<DictionaryEntry>> {
+            lookUpCount++
+            return result
+        }
+
+        override suspend fun search(word: String): Result<List<DictionaryEntry>> = lookup(word)
+    }
+
+    private fun createViewModel(
+        repository: FakeDictionaryRepository,
+        favorites: FakeFavoritesRepository = FakeFavoritesRepository(),
+        tts: FakeTtsEngine = FakeTtsEngine()
+    ) = DictionaryViewModel(repository, favorites, tts)
+
+    @Test
+    fun `successful lookup exposes Success state`() = runTest {
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("hello")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state is DictionaryUiState.Success)
+        assertEquals(listOf(sampleEntry), (state as DictionaryUiState.Success).entries)
+    }
+
+    @Test
+    fun `blank word does not trigger a request`() = runTest {
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("")
+        advanceUntilIdle()
+
+        assertEquals(0, repository.lookUpCount)
+        assertTrue(viewModel.uiState.value is DictionaryUiState.Idle)
+    }
+
+    @Test
+    fun `NotFound surfaces Error state with suggestions`() = runTest {
+        val repository = FakeDictionaryRepository(
+            Result.failure(DictionaryException.NotFound(listOf("hello", "hell")))
+        )
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("helllo")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state is DictionaryUiState.Error)
+        val error = (state as DictionaryUiState.Error).error
+        assertTrue(error is DictionaryException.NotFound)
+        assertEquals(
+            listOf("hello", "hell"),
+            (error as DictionaryException.NotFound).suggestions
+        )
+    }
+
+    @Test
+    fun `repository failure passes through as Error state`() = runTest {
+        val repository = FakeDictionaryRepository(
+            Result.failure(DictionaryException.Network())
+        )
+        val viewModel = createViewModel(repository)
+
+        viewModel.lookUp("hello")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state is DictionaryUiState.Error)
+        assertTrue((state as DictionaryUiState.Error).error is DictionaryException.Network)
+    }
+
+    @Test
+    fun `toggleFavorite adds then removes the word`() = runTest {
+        val favorites = FakeFavoritesRepository()
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository, favorites)
+
+        viewModel.toggleFavorite("Hello")
+        advanceUntilIdle()
+        assertTrue(favorites.isFavorite("hello").first())
+
+        viewModel.toggleFavorite("hello")
+        advanceUntilIdle()
+        assertFalse(favorites.isFavorite("hello").first())
+    }
+
+    @Test
+    fun `speak delegates to the tts engine`() = runTest {
+        val tts = FakeTtsEngine()
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository, tts = tts)
+
+        viewModel.speak("hello")
+
+        assertEquals(listOf("hello"), tts.spoken)
+    }
+}
