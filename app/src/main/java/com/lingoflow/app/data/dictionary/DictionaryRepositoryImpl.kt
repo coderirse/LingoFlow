@@ -54,7 +54,14 @@ class DictionaryRepositoryImpl(
                 !it.isSuccessful -> Result.failure(DictionaryException.Network())
                 else -> {
                     val body = it.body?.string().orEmpty()
-                    MwJsonParser.parse(body)
+                    // MW answers rejected/unsubscribed keys with HTTP 200 and a
+                    // plain-text error; surface it as InvalidApiKey instead of
+                    // letting it fail JSON parsing further down.
+                    if (body.startsWith("Invalid API key")) {
+                        Result.failure(DictionaryException.InvalidApiKey())
+                    } else {
+                        MwJsonParser.parse(body)
+                    }
                 }
             }
         }

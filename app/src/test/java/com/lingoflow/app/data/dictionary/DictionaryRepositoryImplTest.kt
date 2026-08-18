@@ -85,6 +85,20 @@ class DictionaryRepositoryImplTest {
     }
 
     @Test
+    fun `http 200 with plain-text key rejection becomes InvalidApiKey`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("Invalid API key. Not subscribed for this reference.")
+        )
+
+        val result = createRepository().lookup("test")
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is DictionaryException.InvalidApiKey)
+    }
+
+    @Test
     fun `blank api key short circuits with NoApiKey`() = runTest {
         val result = createRepository(apiKey = "").lookup("test")
 

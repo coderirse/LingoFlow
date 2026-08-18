@@ -362,7 +362,7 @@ private fun DictionaryErrorContent(
 
             is DictionaryException.ParseError -> {
                 Text(
-                    text = strings.networkError,
+                    text = strings.parseError,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )

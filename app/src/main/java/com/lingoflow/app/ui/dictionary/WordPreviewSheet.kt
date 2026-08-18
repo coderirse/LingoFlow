@@ -242,7 +242,8 @@ private fun WordPreviewError(
                     )
                 }
             is DictionaryException.InvalidApiKey -> strings.invalidApiKey
-            else -> strings.networkError
+            is DictionaryException.ParseError -> strings.parseError
+            is DictionaryException.Network -> strings.networkError
         }
         Text(
             text = message,
