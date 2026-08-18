@@ -3,7 +3,9 @@ package com.lingoflow.app.ui.dictionary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -42,6 +44,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
+import com.lingoflow.app.ui.components.BlinkingCursor
 import com.lingoflow.app.ui.i18n.LocalStrings
 
 /**
@@ -59,6 +62,9 @@ fun DictionaryBottomSheet(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val lookupInfo by viewModel.lookupInfo.collectAsStateWithLifecycle()
+    val lookupInfoUnavailable by viewModel.lookupInfoUnavailable.collectAsStateWithLifecycle()
+    val lookupInfoLoading by viewModel.lookupInfoLoading.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
     var query by remember { mutableStateOf(initialWord) }
 
@@ -141,6 +147,26 @@ fun DictionaryBottomSheet(
                                 onToggleFavorite = { viewModel.toggleFavorite(entry.word) },
                                 onSpeak = { viewModel.speak(entry.word) }
                             )
+                        }
+
+                        // Youdao-style Chinese glosses from the LLM; shows the
+                        // blinking typewriter cursor while they stream in.
+                        item {
+                            val info = lookupInfo
+                            when {
+                                info != null -> WordLookupInfoContent(info = info)
+
+                                lookupInfoLoading -> {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    BlinkingCursor()
+                                }
+
+                                lookupInfoUnavailable -> Text(
+                                    text = strings.chineseMeaningUnavailable,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }

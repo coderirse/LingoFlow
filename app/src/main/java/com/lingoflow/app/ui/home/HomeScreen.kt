@@ -768,6 +768,14 @@ private fun TranslationResultCard(
                     StreamingText(text = uiState.streamingText)
                 }
 
+                uiState.isTranslating -> {
+                    // One-shot translation in progress (ML Kit STANDARD or
+                    // LLM LEARNING): same blinking typewriter cursor as the
+                    // streaming modes.
+                    Spacer(modifier = Modifier.height(8.dp))
+                    BlinkingCursor()
+                }
+
                 response is TranslationResponse.Learning -> {
                     SelectionContainer {
                         Text(
