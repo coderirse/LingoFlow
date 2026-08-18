@@ -8,6 +8,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
 
@@ -17,7 +18,15 @@ object DictionaryModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient = OkHttpClient()
+    fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        // LLM completions are slow: a non-streaming answer or the gap before
+        // the next SSE delta can easily exceed OkHttp's 10s default read
+        // timeout on a slow network, which used to surface as a stuck
+        // loading cursor or a spurious "Translation failed" error.
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
 
     @Provides
     @Singleton

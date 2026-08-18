@@ -21,8 +21,10 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** UI state for the home translation screen. */
 data class HomeUiState(
@@ -88,6 +90,25 @@ class HomeViewModel @Inject constructor(
             translateText.fallbackMessages.collect { message ->
                 _uiState.update { it.copy(snackbarMessage = message) }
             }
+        }
+        // Single source of truth for the favorite heart: the stored history
+        // record. Unfavoriting from the Learning tab updates the heart here.
+        // catch {} guards the process: a DataStore hiccup must never crash.
+        viewModelScope.launch {
+            historyRepository.getAllHistory()
+                .catch { }
+                .collect { items ->
+                    _uiState.update { state ->
+                        val favorite = state.currentHistoryId
+                            ?.let { id -> items.firstOrNull { it.id == id }?.isFavorite }
+                            ?: false
+                        if (favorite == state.isCurrentFavorite) {
+                            state
+                        } else {
+                            state.copy(isCurrentFavorite = favorite)
+                        }
+                    }
+                }
         }
     }
 
@@ -273,11 +294,15 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.update { it.copy(wordLookupLoading = true) }
-            lookupWordUseCase(word.lowercase())
-                .onSuccess { info ->
-                    _uiState.update { it.copy(wordLookup = info) }
-                }
-            // Failure: silently keep the plain ML Kit translation only.
+            // Hard cap: a hung LLM call must never leave the loading cursor
+            // on screen forever. Timeout settles silently, same as failure.
+            val result = withTimeoutOrNull(WORD_LOOKUP_TIMEOUT_MS) {
+                lookupWordUseCase(word.lowercase())
+            }
+            result?.onSuccess { info ->
+                _uiState.update { it.copy(wordLookup = info) }
+            }
+            // Failure/timeout: silently keep the plain ML Kit translation only.
             _uiState.update { it.copy(wordLookupLoading = false) }
         }
     }
@@ -302,12 +327,15 @@ class HomeViewModel @Inject constructor(
         ttsEngine.speak(text, state.targetLanguage.ttsTag ?: "en-US")
     }
 
-    /** Toggles the favorite flag on the current translation record. */
+    /**
+     * Toggles the favorite flag on the current translation record. The heart
+     * state itself is driven by the history flow collector, so the stored
+     * record is the single source of truth.
+     */
     fun onToggleFavoriteTranslation() {
         val historyId = _uiState.value.currentHistoryId ?: return
         viewModelScope.launch {
             historyRepository.toggleFavorite(historyId)
-            _uiState.update { it.copy(isCurrentFavorite = !it.isCurrentFavorite) }
         }
     }
 
@@ -345,5 +373,6 @@ class HomeViewModel @Inject constructor(
             TranslationMode.FORMAL
         )
         val SINGLE_ENGLISH_WORD = Regex("^[a-zA-Z-]{1,30}$")
+        const val WORD_LOOKUP_TIMEOUT_MS = 20_000L
     }
 }

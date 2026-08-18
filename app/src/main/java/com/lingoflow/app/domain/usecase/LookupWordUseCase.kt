@@ -9,6 +9,8 @@ import com.lingoflow.app.domain.model.llm.Message
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -43,17 +45,8 @@ open class LookupWordUseCase(
             cache[key]?.let { return Result.success(it) }
         }
 
-        val settings = settingsRepository.getSettings()
-        val config = settings.llmProviders[settings.activeLlmProviderId]
-            ?: ProviderConfig(
-                providerId = settings.activeLlmProviderId,
-                apiKey = "",
-                baseUrl = null,
-                model = settings.activeLlmProviderId.defaultModel
-            )
-        if (config.apiKey.isBlank()) {
-            return Result.failure(TranslationException("LLM API key is not configured."))
-        }
+        val config = resolveProviderConfig()
+            ?: return Result.failure(TranslationException("LLM API key is not configured."))
 
         return try {
             val provider = providerFactory(config)
@@ -76,6 +69,127 @@ open class LookupWordUseCase(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Streaming variant: the LLM answers in a line-oriented plain-text format
+     * (WORD:/POS:/EX:/EX_CN:) so each completed line can be parsed and emitted
+     * immediately. Collectors see the entry grow gloss by gloss instead of
+     * waiting for the whole response. The final result is cached; a cached
+     * word emits once, instantly. Any failure throws inside the flow —
+     * collectors fall back to the Merriam-Webster English entry.
+     */
+    open fun lookupStream(word: String): Flow<WordLookupInfo> = flow {
+        val key = word.trim().lowercase()
+        if (key.isEmpty()) throw TranslationException("Nothing to look up.")
+        val cached = synchronized(cache) { cache[key] }
+        if (cached != null) {
+            emit(cached)
+            return@flow
+        }
+
+        val config = resolveProviderConfig()
+            ?: throw TranslationException("LLM API key is not configured.")
+
+        val provider = providerFactory(config)
+        val stream = provider.chatStream(
+            ChatRequest(
+                model = config.model.ifBlank { config.providerId.defaultModel },
+                messages = listOf(
+                    Message(role = "system", content = STREAM_SYSTEM_PROMPT),
+                    Message(role = "user", content = key)
+                ),
+                temperature = 0.3f,
+                maxTokens = 400
+            )
+        )
+
+        val accumulated = StringBuilder()
+        var lastEmitted: WordLookupInfo? = null
+        stream.collect { delta ->
+            accumulated.append(delta)
+            val partial = parseStreamText(key, accumulated.toString(), complete = false)
+            if (partial != null && partial != lastEmitted) {
+                lastEmitted = partial
+                emit(partial)
+            }
+        }
+        val final = parseStreamText(key, accumulated.toString(), complete = true)
+            ?: throw TranslationException("LLM returned no usable dictionary info.")
+        synchronized(cache) { cache[key] = final }
+        if (final != lastEmitted) emit(final)
+    }
+
+    /** Active provider config, or null when no API key is configured. */
+    private suspend fun resolveProviderConfig(): ProviderConfig? {
+        val settings = settingsRepository.getSettings()
+        val config = settings.llmProviders[settings.activeLlmProviderId]
+            ?: ProviderConfig(
+                providerId = settings.activeLlmProviderId,
+                apiKey = "",
+                baseUrl = null,
+                model = settings.activeLlmProviderId.defaultModel
+            )
+        return config.takeIf { it.apiKey.isNotBlank() }
+    }
+
+    /**
+     * Parses the line-oriented stream format. When [complete] is false the
+     * last (possibly partial) line is ignored so only fully arrived lines are
+     * shown. Returns null until at least one usable POS line is available, so
+     * format symbols never leak into the UI.
+     */
+    internal fun parseStreamText(
+        fallbackWord: String,
+        text: String,
+        complete: Boolean
+    ): WordLookupInfo? {
+        val lines = text.split('\n')
+        val usableLines = if (complete) lines else lines.dropLast(1)
+        var word: String? = null
+        val entries = mutableListOf<PosMeaning>()
+        var example: String? = null
+        var exampleTranslation: String? = null
+
+        for (raw in usableLines) {
+            // Tolerate model quirks: markdown bullets/bold and full-width
+            // colons (the Chinese prompt makes "POS：..." a real occurrence).
+            val line = raw.trim()
+                .trimStart('-', '*', ' ')
+                .replace("**", "")
+                .replace('：', ':')
+            when {
+                line.startsWith("WORD:") ->
+                    word = line.removePrefix("WORD:").trim().ifBlank { null }
+
+                line.startsWith("POS:") -> {
+                    val body = line.removePrefix("POS:").trim()
+                    val parts = body.split('|', limit = 2)
+                    if (parts.size == 2) {
+                        val pos = parts[0].trim()
+                        val meanings = parts[1].split('；', ';')
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                        if (pos.isNotBlank() && meanings.isNotEmpty()) {
+                            entries += PosMeaning(pos, meanings)
+                        }
+                    }
+                }
+
+                line.startsWith("EX:") ->
+                    example = line.removePrefix("EX:").trim().ifBlank { null }
+
+                line.startsWith("EX_CN:") ->
+                    exampleTranslation = line.removePrefix("EX_CN:").trim().ifBlank { null }
+            }
+        }
+        if (entries.isEmpty()) return null
+        return WordLookupInfo(
+            word = word ?: fallbackWord,
+            entries = entries,
+            example = example,
+            exampleTranslation = exampleTranslation
+        )
     }
 
     private fun parse(word: String, content: String): WordLookupInfo {
@@ -123,5 +237,16 @@ open class LookupWordUseCase(
                 "}\n" +
                 "要求：entries 至少一个；meanings 用中文；例句简短自然；如果输入是变形词" +
                 "（如过去式、复数），word 字段返回原型。"
+
+        const val STREAM_SYSTEM_PROMPT =
+            "你是英汉词典助手。用户会给你一个英文单词，请严格按以下纯文本格式逐行输出，" +
+                "不要输出任何其他文字、markdown 标记、序号或空行：\n" +
+                "WORD: 单词原型\n" +
+                "POS: 词性缩写 | 中文释义1；中文释义2\n" +
+                "POS: 词性缩写 | 中文释义\n" +
+                "EX: 一句地道英文例句\n" +
+                "EX_CN: 例句的中文翻译\n" +
+                "要求：POS 行至少一行，每种词性单独一行；释义用中文，多个释义用中文分号分隔；" +
+                "例句简短自然；输入是变形词（如过去式、复数）时 WORD 返回原型。"
     }
 }

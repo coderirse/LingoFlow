@@ -60,6 +60,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -72,10 +78,13 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -974,23 +983,42 @@ private fun ClickableWords(
     }
 }
 
-/** Streaming translation text with a blinking typewriter cursor. */
+/**
+ * Streaming translation text with the typewriter cursor rendered inline as an
+ * annotated-string span. Keeping the cursor inside the same [Text] layout
+ * guarantees it stays glued to the end of the text — no line jumping or
+ * layout shifts while deltas arrive.
+ */
 @Composable
 private fun StreamingText(
     text: String,
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = text.ifEmpty { " " },
-            style = MaterialTheme.typography.bodyLarge.copy(
-                lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f, fill = false)
-        )
-        BlinkingCursor()
+    val transition = rememberInfiniteTransition(label = "streamCursor")
+    val cursorAlpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "streamCursorAlpha"
+    )
+    val cursorColor = LingoFlowPrimary.copy(alpha = cursorAlpha)
+    val display = remember(text, cursorColor) {
+        buildAnnotatedString {
+            append(text)
+            withStyle(SpanStyle(color = cursorColor)) { append("▌") }
+        }
     }
+    Text(
+        text = display,
+        style = MaterialTheme.typography.bodyLarge.copy(
+            lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.fillMaxWidth()
+    )
 }
 
 @Composable

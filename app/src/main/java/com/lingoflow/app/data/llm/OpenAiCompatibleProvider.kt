@@ -114,6 +114,10 @@ class OpenAiCompatibleProvider(
                         }
                     }
                     close()
+                } catch (e: IOException) {
+                    // Mid-stream read failures (timeouts, dropped connections)
+                    // are network problems, not malformed data.
+                    close(LlmException.Network(e))
                 } catch (e: Exception) {
                     close(LlmException.ParseError(e))
                 } finally {

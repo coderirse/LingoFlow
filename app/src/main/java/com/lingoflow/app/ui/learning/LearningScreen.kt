@@ -3,6 +3,7 @@ package com.lingoflow.app.ui.learning
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,14 +31,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
 import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.theme.LingoFlowSecondary
 
-/** Real Learning tab: the user's favorite dictionary words. */
+/**
+ * Real Learning tab: favorited translations and favorited dictionary words,
+ * one list with two sections. Both hearts across the app feed this screen.
+ */
 @Composable
 fun LearningRoute(
     onGoToSettings: () -> Unit,
@@ -45,9 +51,12 @@ fun LearningRoute(
     viewModel: LearningViewModel = hiltViewModel()
 ) {
     val words by viewModel.favoriteWords.collectAsStateWithLifecycle()
+    val translations by viewModel.favoriteTranslations.collectAsStateWithLifecycle()
     LearningScreen(
         words = words,
+        translations = translations,
         onRemove = viewModel::remove,
+        onRemoveTranslation = viewModel::removeTranslation,
         onGoToSettings = onGoToSettings,
         modifier = modifier
     )
@@ -56,14 +65,16 @@ fun LearningRoute(
 @Composable
 fun LearningScreen(
     words: List<String>,
+    translations: List<TranslationHistoryItem>,
     onRemove: (String) -> Unit,
+    onRemoveTranslation: (String) -> Unit,
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val strings = LocalStrings.current
     var lookupWord by remember { mutableStateOf<String?>(null) }
 
-    if (words.isEmpty()) {
+    if (words.isEmpty() && translations.isEmpty()) {
         Column(
             modifier = modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -85,38 +96,30 @@ fun LearningScreen(
     } else {
         LazyColumn(
             modifier = modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(words, key = { it }) { word ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { lookupWord = word },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = word,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        IconButton(onClick = { onRemove(word) }) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = strings.removeFromFavorites,
-                                tint = LingoFlowSecondary
-                            )
-                        }
-                    }
+            if (translations.isNotEmpty()) {
+                item(key = "header_translations") {
+                    SectionHeader(strings.favoriteTranslationsSection)
+                }
+                items(translations, key = { "t_${it.id}" }) { item ->
+                    FavoriteTranslationCard(
+                        item = item,
+                        onRemove = { onRemoveTranslation(item.id) }
+                    )
+                }
+            }
+            if (words.isNotEmpty()) {
+                item(key = "header_words") {
+                    SectionHeader(strings.favoriteWordsSection)
+                }
+                items(words, key = { "w_$it" }) { word ->
+                    FavoriteWordCard(
+                        word = word,
+                        onClick = { lookupWord = word },
+                        onRemove = { onRemove(word) }
+                    )
                 }
             }
         }
@@ -131,5 +134,100 @@ fun LearningScreen(
                 onGoToSettings()
             }
         )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
+private fun FavoriteTranslationCard(
+    item: TranslationHistoryItem,
+    onRemove: () -> Unit
+) {
+    val strings = LocalStrings.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.sourceText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = item.translatedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Default.Favorite,
+                    contentDescription = strings.removeFromFavorites,
+                    tint = LingoFlowSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteWordCard(
+    word: String,
+    onClick: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val strings = LocalStrings.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = word,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Default.Favorite,
+                    contentDescription = strings.removeFromFavorites,
+                    tint = LingoFlowSecondary
+                )
+            }
+        }
     }
 }

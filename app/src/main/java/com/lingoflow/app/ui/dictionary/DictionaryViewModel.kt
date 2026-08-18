@@ -12,6 +12,7 @@ import com.lingoflow.app.domain.repository.FavoritesRepository
 import com.lingoflow.app.domain.usecase.LookupWordUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,23 +54,59 @@ class DictionaryViewModel @Inject constructor(
 
     val ttsReady: Boolean get() = ttsEngine.isReady
 
+    /** Guards async results: a stale job from a previous word never writes state. */
+    private var lookupEpoch = 0
+    private var mwJob: kotlinx.coroutines.Job? = null
+    private var llmJob: kotlinx.coroutines.Job? = null
+
     fun lookUp(word: String) {
         if (word.isBlank()) return
+        val key = word.trim().lowercase()
+        val epoch = ++lookupEpoch
+        // Rapid word switching: interrupt the previous requests so results
+        // from the old word can never bleed into the new card.
+        mwJob?.cancel()
+        llmJob?.cancel()
 
-        viewModelScope.launch {
+        mwJob = viewModelScope.launch {
             _uiState.value = DictionaryUiState.Loading
-            _uiState.value = lookUpWithInflectionFallback(word.trim().lowercase())
+            val result = lookUpWithInflectionFallback(key)
+            if (epoch == lookupEpoch) _uiState.value = result
         }
-        // Chinese glosses come from the LLM in parallel; failures are silent
-        // and the UI falls back to the Merriam-Webster English entry.
+        // Chinese glosses stream in from the LLM in parallel, line by line;
+        // failures are silent and the UI falls back to the Merriam-Webster
+        // English entry.
         _lookupInfo.value = null
         _lookupInfoUnavailable.value = false
         _lookupInfoLoading.value = true
-        viewModelScope.launch {
-            lookupWordUseCase(word.trim().lowercase())
-                .onSuccess { _lookupInfo.value = it }
-                .onFailure { _lookupInfoUnavailable.value = true }
-            _lookupInfoLoading.value = false
+        llmJob = viewModelScope.launch {
+            try {
+                lookupWordUseCase.lookupStream(key).collect { info ->
+                    if (epoch == lookupEpoch) _lookupInfo.value = info
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Fall through to the one-shot retry below.
+            }
+            // The stream gave us nothing usable (format drift, transient
+            // network): retry once via the robust one-shot JSON path, which
+            // parses tolerantly. Cached words never reach this point.
+            if (epoch == lookupEpoch && _lookupInfo.value == null) {
+                try {
+                    lookupWordUseCase(key).onSuccess { info ->
+                        if (epoch == lookupEpoch) _lookupInfo.value = info
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Silent: the UI falls back to the MW English entry.
+                }
+            }
+            if (epoch == lookupEpoch) {
+                _lookupInfoUnavailable.value = _lookupInfo.value == null
+                _lookupInfoLoading.value = false
+            }
         }
     }
 
