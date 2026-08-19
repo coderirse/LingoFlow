@@ -7,7 +7,9 @@ import com.lingoflow.app.domain.repository.SettingsRepository
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -40,27 +42,32 @@ class DictionaryRepositoryImpl(
             .addQueryParameter("key", apiKey)
             .build()
 
-        val response = try {
-            client.newCall(Request.Builder().url(url).build()).await()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            return Result.failure(DictionaryException.Network(e))
-        }
+        // await() resumes on the caller's dispatcher (Main for ViewModels) and
+        // body.string() is a blocking read — keep all of it off the main
+        // thread or the UI freezes for the whole download.
+        return withContext(Dispatchers.IO) {
+            val response = try {
+                client.newCall(Request.Builder().url(url).build()).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                return@withContext Result.failure(DictionaryException.Network(e))
+            }
 
-        response.use {
-            return when {
-                it.code == 403 -> Result.failure(DictionaryException.InvalidApiKey())
-                !it.isSuccessful -> Result.failure(DictionaryException.Network())
-                else -> {
-                    val body = it.body?.string().orEmpty()
-                    // MW answers rejected/unsubscribed keys with HTTP 200 and a
-                    // plain-text error; surface it as InvalidApiKey instead of
-                    // letting it fail JSON parsing further down.
-                    if (body.startsWith("Invalid API key")) {
-                        Result.failure(DictionaryException.InvalidApiKey())
-                    } else {
-                        MwJsonParser.parse(body)
+            response.use {
+                when {
+                    it.code == 403 -> Result.failure(DictionaryException.InvalidApiKey())
+                    !it.isSuccessful -> Result.failure(DictionaryException.Network())
+                    else -> {
+                        val body = it.body?.string().orEmpty()
+                        // MW answers rejected/unsubscribed keys with HTTP 200 and a
+                        // plain-text error; surface it as InvalidApiKey instead of
+                        // letting it fail JSON parsing further down.
+                        if (body.startsWith("Invalid API key")) {
+                            Result.failure(DictionaryException.InvalidApiKey())
+                        } else {
+                            MwJsonParser.parse(body)
+                        }
                     }
                 }
             }

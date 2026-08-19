@@ -1,5 +1,6 @@
 package com.lingoflow.app.ui.history
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,7 +42,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.i18n.LocalStrings
-import com.lingoflow.app.ui.theme.LingoFlowPrimary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,7 +83,7 @@ fun HistoryScreen(
                 horizontalArrangement = Arrangement.End
             ) {
                 TextButton(onClick = { showClearConfirm = true }) {
-                    Text(strings.clearAll, color = LingoFlowPrimary)
+                    Text(strings.clearAll, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -159,7 +159,8 @@ private fun HistoryCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -185,7 +186,7 @@ private fun HistoryCard(
                         )
                     },
                     colors = AssistChipDefaults.assistChipColors(
-                        labelColor = LingoFlowPrimary
+                        labelColor = MaterialTheme.colorScheme.primary
                     )
                 )
             }

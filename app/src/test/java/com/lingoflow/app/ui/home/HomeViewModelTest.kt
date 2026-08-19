@@ -299,6 +299,27 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `favorite state follows the stored history record`() = runTest {
+        val bundle = createViewModel()
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val historyId = bundle.viewModel.uiState.value.currentHistoryId
+        assertNotNull(historyId)
+        assertFalse(bundle.viewModel.uiState.value.isCurrentFavorite)
+
+        // Toggled from outside (e.g. the Learning tab): the heart follows.
+        bundle.history.toggleFavorite(historyId!!)
+        advanceUntilIdle()
+        assertTrue(bundle.viewModel.uiState.value.isCurrentFavorite)
+
+        bundle.history.toggleFavorite(historyId)
+        advanceUntilIdle()
+        assertFalse(bundle.viewModel.uiState.value.isCurrentFavorite)
+    }
+
+    @Test
     fun `speak reads the translation in the target language`() = runTest {
         val bundle = createViewModel()
         bundle.viewModel.onInputChange("Hello")
@@ -474,5 +495,33 @@ class HomeViewModelTest {
 
         assertFalse(bundle.viewModel.uiState.value.wordLookupLoading)
         assertNull(bundle.viewModel.uiState.value.wordLookup)
+    }
+
+    @Test
+    fun `hung word lookup is capped by timeout and loading settles`() = runTest {
+        // Lookup that never answers: the 20s guard must settle the UI.
+        val hangingLookup = object : com.lingoflow.app.domain.usecase.LookupWordUseCase(
+            FakeSettingsRepository(),
+            { com.lingoflow.app.data.llm.FakeLlmProvider() }
+        ) {
+            override suspend fun invoke(
+                word: String
+            ): Result<com.lingoflow.app.domain.model.dictionary.WordLookupInfo> {
+                kotlinx.coroutines.delay(120_000)
+                error("unreachable")
+            }
+        }
+        val bundle = createViewModel(lookup = hangingLookup)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("consider")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.wordLookupLoading)
+        assertNull(state.wordLookup)
+        // ML Kit direct translation is unaffected.
+        assertTrue(state.translationResponse is TranslationResponse.Standard)
     }
 }

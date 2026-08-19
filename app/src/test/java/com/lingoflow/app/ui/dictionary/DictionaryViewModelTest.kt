@@ -179,10 +179,9 @@ class DictionaryViewModelTest {
     @Test
     fun `lookup info loads chinese glosses alongside the entry`() = runTest {
         val provider = com.lingoflow.app.data.llm.FakeLlmProvider(
-            chatResult = com.lingoflow.app.domain.model.llm.ChatResponse(
-                content = """{"word": "hello", "entries": [{"partOfSpeech": "int.", "meanings": ["你好", "喂"]}], "example": "Hello, world.", "exampleTranslation": "你好，世界。"}""",
-                finishReason = "stop",
-                usage = null
+            streamFlow = kotlinx.coroutines.flow.flowOf(
+                "WORD: hello\nPOS: int. | 你好；喂\n",
+                "EX: Hello, world.\nEX_CN: 你好，世界。\n"
             )
         )
         val settings = com.lingoflow.app.data.repository.FakeSettingsRepository(
@@ -223,5 +222,45 @@ class DictionaryViewModelTest {
 
         assertTrue(viewModel.uiState.value is DictionaryUiState.Success)
         assertTrue(viewModel.lookupInfoUnavailable.value)
+    }
+
+    @Test
+    fun `unusable stream falls back to the one-shot json lookup`() = runTest {
+        // Stream returns garbage, but the one-shot JSON path answers fine:
+        // the card must still show Chinese glosses.
+        val provider = com.lingoflow.app.data.llm.FakeLlmProvider(
+            chatResult = com.lingoflow.app.domain.model.llm.ChatResponse(
+                content = """{"word": "engage", "entries": [{"partOfSpeech": "vt.", "meanings": ["参与", "吸引"]}], "example": "Engage the reader.", "exampleTranslation": "吸引读者。"}""",
+                finishReason = "stop",
+                usage = null
+            ),
+            streamFlow = kotlinx.coroutines.flow.flowOf("complete nonsense\n")
+        )
+        val settings = com.lingoflow.app.data.repository.FakeSettingsRepository(
+            com.lingoflow.app.domain.model.settings.AppSettings(
+                activeLlmProviderId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                llmProviders = mapOf(
+                    com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK to
+                        com.lingoflow.app.domain.model.settings.ProviderConfig(
+                            providerId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                            apiKey = "sk-test",
+                            baseUrl = null,
+                            model = "deepseek-chat"
+                        )
+                ),
+                dictionaryApiKey = ""
+            )
+        )
+        val lookup = com.lingoflow.app.domain.usecase.LookupWordUseCase(settings) { provider }
+        val repository = FakeDictionaryRepository(Result.success(listOf(sampleEntry)))
+        val viewModel = createViewModel(repository, lookup = lookup)
+
+        viewModel.lookUp("engage")
+        advanceUntilIdle()
+
+        val info = viewModel.lookupInfo.value
+        assertTrue(info != null)
+        assertEquals(listOf("参与", "吸引"), info!!.entries[0].meanings)
+        assertFalse(viewModel.lookupInfoUnavailable.value)
     }
 }

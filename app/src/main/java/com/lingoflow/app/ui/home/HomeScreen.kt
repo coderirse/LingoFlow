@@ -2,6 +2,9 @@ package com.lingoflow.app.ui.home
 
 import android.content.ClipData
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -60,6 +64,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,16 +78,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -94,8 +110,6 @@ import com.lingoflow.app.ui.dictionary.WordPreviewSheet
 import com.lingoflow.app.ui.history.HistoryRoute
 import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.learning.LearningRoute
-import com.lingoflow.app.ui.theme.LingoFlowPrimary
-import com.lingoflow.app.ui.theme.LingoFlowSecondary
 import com.lingoflow.app.ui.theme.LingoFlowTheme
 import kotlinx.coroutines.launch
 
@@ -339,7 +353,7 @@ private fun HomeTab(
                         .fillMaxWidth()
                         .height(3.dp),
                     shape = RoundedCornerShape(2.dp),
-                    color = LingoFlowPrimary
+                    color = MaterialTheme.colorScheme.primary
                 ) {}
             }
         }
@@ -441,7 +455,8 @@ private fun InputCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BasicTextField(
@@ -472,7 +487,7 @@ private fun InputCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onPaste) {
-                    Text(strings.paste, color = LingoFlowPrimary)
+                    Text(strings.paste, color = MaterialTheme.colorScheme.primary)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (inputText.isNotEmpty()) {
@@ -512,7 +527,8 @@ private fun LanguageBar(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(
             modifier = Modifier
@@ -528,11 +544,18 @@ private fun LanguageBar(
                 onSelected = onSourceLanguageChange,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = onSwapLanguages, enabled = enabled) {
+            IconButton(
+                onClick = onSwapLanguages,
+                enabled = enabled,
+                modifier = Modifier
+                    .size(40.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = "Swap languages",
-                    tint = LingoFlowPrimary
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
             LanguagePicker(
@@ -621,7 +644,12 @@ private fun ModeCard(
             .defaultMinSize(minWidth = 72.dp)
             .height(48.dp),
         shape = RoundedCornerShape(12.dp),
-        color = if (isSelected) LingoFlowPrimary else MaterialTheme.colorScheme.surface
+        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        border = if (isSelected) {
+            null
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        }
     ) {
         Box(
             contentAlignment = Alignment.Center,
@@ -646,6 +674,11 @@ private fun TranslateButton(
 ) {
     val strings = LocalStrings.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val enabled = uiState.isStreaming ||
+        (uiState.inputText.isNotBlank() && !uiState.isTranslating)
+    val gradient = Brush.horizontalGradient(
+        listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
+    )
 
     Button(
         onClick = {
@@ -656,42 +689,57 @@ private fun TranslateButton(
                 onTranslateClick()
             }
         },
-        enabled = uiState.isStreaming ||
-            (uiState.inputText.isNotBlank() && !uiState.isTranslating),
+        enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp),
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (uiState.isStreaming) {
-                MaterialTheme.colorScheme.error
-            } else {
-                LingoFlowPrimary
-            }
-        )
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues()
     ) {
-        when {
-            uiState.isStreaming -> {
-                Text(strings.cancel, style = MaterialTheme.typography.titleMedium)
-            }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    when {
+                        uiState.isStreaming ->
+                            Modifier.background(MaterialTheme.colorScheme.error)
 
-            uiState.isTranslating -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.size(12.dp))
-                Text(
-                    when (uiState.status) {
-                        TranslationStatus.PREPARING_MODEL -> strings.preparingModel
-                        else -> strings.translating
+                        enabled -> Modifier.background(gradient)
+
+                        else -> Modifier
                     }
-                )
-            }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                uiState.isStreaming -> {
+                    Text(strings.cancel, style = MaterialTheme.typography.titleMedium)
+                }
 
-            else -> {
-                Text(strings.translate, style = MaterialTheme.typography.titleMedium)
+                uiState.isTranslating -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.size(12.dp))
+                    Text(
+                        when (uiState.status) {
+                            TranslationStatus.PREPARING_MODEL -> strings.preparingModel
+                            else -> strings.translating
+                        }
+                    )
+                }
+
+                else -> {
+                    Text(strings.translate, style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     }
@@ -714,7 +762,17 @@ private fun TranslationResultCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        // The one brand moment: a very subtle blue→cyan gradient hairline.
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                )
+            )
+        )
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(
@@ -725,7 +783,7 @@ private fun TranslationResultCard(
                 Text(
                     text = strings.translationTitle,
                     style = MaterialTheme.typography.titleMedium,
-                    color = LingoFlowPrimary
+                    color = MaterialTheme.colorScheme.primary
                 )
                 IconButton(
                     onClick = onSpeakClick,
@@ -735,7 +793,7 @@ private fun TranslationResultCard(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = strings.speakTranslation,
                         tint = if (uiState.ttsReady && hasResult) {
-                            LingoFlowPrimary
+                            MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -777,12 +835,23 @@ private fun TranslationResultCard(
                 }
 
                 response is TranslationResponse.Learning -> {
-                    SelectionContainer {
-                        Text(
+                    if (uiState.targetLanguage == Language.ENGLISH) {
+                        // Same tap-to-lookup words as the Standard English result.
+                        ClickableWords(
                             text = response.translatedText,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
+                            onWordClick = onWordClick
                         )
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                text = response.translatedText,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = 18.sp,
+                                    lineHeight = 27.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                     response.contextExplanation?.let { explanation ->
                         Spacer(modifier = Modifier.height(12.dp))
@@ -790,7 +859,7 @@ private fun TranslationResultCard(
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = strings.analysis,
-                            color = LingoFlowSecondary,
+                            color = MaterialTheme.colorScheme.secondary,
                             style = MaterialTheme.typography.labelLarge
                         )
                         if (explanation.meaningInContext.isNotBlank()) {
@@ -827,7 +896,7 @@ private fun TranslationResultCard(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = strings.keyWords,
-                            color = LingoFlowSecondary,
+                            color = MaterialTheme.colorScheme.secondary,
                             style = MaterialTheme.typography.labelLarge
                         )
                         response.dictionaryEntries.take(3).forEach { entry ->
@@ -854,7 +923,8 @@ private fun TranslationResultCard(
                             Text(
                                 text = response.translatedText,
                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                    lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
+                                    fontSize = 18.sp,
+                                    lineHeight = 27.sp
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -903,7 +973,7 @@ private fun TranslationResultCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onCopy) {
-                        Text(strings.copy, color = LingoFlowPrimary)
+                        Text(strings.copy, color = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = onShare) {
                         Icon(
@@ -924,7 +994,7 @@ private fun TranslationResultCard(
                             },
                             contentDescription = strings.favoriteTranslation,
                             tint = if (uiState.isCurrentFavorite) {
-                                LingoFlowSecondary
+                                MaterialTheme.colorScheme.secondary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             }
@@ -965,32 +1035,53 @@ private fun ClickableWords(
                     onWordClick(cleanWord)
                 },
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5,
+                    fontSize = 18.sp,
+                    lineHeight = 27.sp,
                     textDecoration = if (isTapped) TextDecoration.Underline else null
                 ),
-                color = if (isTapped) LingoFlowPrimary else MaterialTheme.colorScheme.onSurface
+                color = if (isTapped) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
             )
         }
     }
 }
 
-/** Streaming translation text with a blinking typewriter cursor. */
+/**
+ * Streaming translation text with the typewriter cursor rendered inline as an
+ * annotated-string span. Keeping the cursor inside the same [Text] layout
+ * guarantees it stays glued to the end of the text — no line jumping or
+ * layout shifts while deltas arrive.
+ */
 @Composable
 private fun StreamingText(
     text: String,
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = text.ifEmpty { " " },
-            style = MaterialTheme.typography.bodyLarge.copy(
-                lineHeight = MaterialTheme.typography.bodyLarge.fontSize * 1.5
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f, fill = false)
-        )
-        BlinkingCursor()
+    val transition = rememberInfiniteTransition(label = "streamCursor")
+    val cursorAlpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "streamCursorAlpha"
+    )
+    val cursorColor = MaterialTheme.colorScheme.primary.copy(alpha = cursorAlpha)
+    val display = remember(text, cursorColor) {
+        buildAnnotatedString {
+            append(text)
+            withStyle(SpanStyle(color = cursorColor)) { append("▌") }
+        }
     }
+    Text(
+        text = display,
+        style = MaterialTheme.typography.bodyLarge.copy(
+            fontSize = 18.sp,
+            lineHeight = 27.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.fillMaxWidth()
+    )
 }
 
 @Composable
@@ -1006,7 +1097,8 @@ private fun DictionaryLookupSection(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1015,7 +1107,7 @@ private fun DictionaryLookupSection(
             Text(
                 text = strings.dictionary,
                 style = MaterialTheme.typography.titleSmall,
-                color = LingoFlowSecondary
+                color = MaterialTheme.colorScheme.secondary
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1039,7 +1131,7 @@ private fun DictionaryLookupSection(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = strings.lookUpWord,
-                        tint = LingoFlowPrimary
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -1089,12 +1181,12 @@ private fun BrandingFooter(modifier: Modifier = Modifier) {
                 painter = painterResource(id = R.drawable.ic_github),
                 contentDescription = "GitHub",
                 modifier = Modifier.size(20.dp),
-                tint = LingoFlowPrimary
+                tint = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = strings.viewOnGitHub,
-                color = LingoFlowPrimary,
+                color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.labelLarge
             )
         }

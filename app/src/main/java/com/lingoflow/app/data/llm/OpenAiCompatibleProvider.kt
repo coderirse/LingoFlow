@@ -9,10 +9,12 @@ import com.lingoflow.app.domain.model.settings.ProviderConfig
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -51,38 +53,44 @@ class OpenAiCompatibleProvider(
     private val baseUrl: String =
         (config.baseUrl?.ifBlank { null } ?: config.providerId.defaultBaseUrl).trimEnd('/')
 
-    override suspend fun chat(request: ChatRequest): ChatResponse {
-        val httpRequest = Request.Builder()
-            .url("$baseUrl/chat/completions")
-            .header("Authorization", "Bearer ${config.apiKey}")
-            .post(buildRequestBody(request, stream = false))
-            .build()
+    override suspend fun chat(request: ChatRequest): ChatResponse =
+        // enqueue's callback resumes the coroutine on the caller's dispatcher
+        // (Main for ViewModel callers), and body.string() below is a BLOCKING
+        // read — the response body is not downloaded yet when onResponse
+        // fires. On Main this freezes the whole UI for the entire download
+        // (ANR). Force the call and the body read onto the IO dispatcher.
+        withContext(Dispatchers.IO) {
+            val httpRequest = Request.Builder()
+                .url("$baseUrl/chat/completions")
+                .header("Authorization", "Bearer ${config.apiKey}")
+                .post(buildRequestBody(request, stream = false))
+                .build()
 
-        val response = try {
-            client.newCall(httpRequest).await()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw LlmException.Network(e)
-        }
+            val response = try {
+                client.newCall(httpRequest).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                throw LlmException.Network(e)
+            }
 
-        response.use {
-            throwForHttpError(it.code)
-            val body = it.body?.string().orEmpty()
-            return try {
-                val parsed = json.decodeFromString<ChatCompletionResponse>(body)
-                ChatResponse(
-                    content = parsed.choices.firstOrNull()?.message?.content.orEmpty(),
-                    finishReason = parsed.choices.firstOrNull()?.finishReason,
-                    usage = parsed.usage?.let { u ->
-                        TokenUsage(u.promptTokens, u.completionTokens)
-                    }
-                )
-            } catch (e: Exception) {
-                throw LlmException.ParseError(e)
+            response.use {
+                throwForHttpError(it.code)
+                val body = it.body?.string().orEmpty()
+                try {
+                    val parsed = json.decodeFromString<ChatCompletionResponse>(body)
+                    ChatResponse(
+                        content = parsed.choices.firstOrNull()?.message?.content.orEmpty(),
+                        finishReason = parsed.choices.firstOrNull()?.finishReason,
+                        usage = parsed.usage?.let { u ->
+                            TokenUsage(u.promptTokens, u.completionTokens)
+                        }
+                    )
+                } catch (e: Exception) {
+                    throw LlmException.ParseError(e)
+                }
             }
         }
-    }
 
     override suspend fun chatStream(request: ChatRequest): Flow<String> = callbackFlow {
         val httpRequest = Request.Builder()
@@ -114,6 +122,10 @@ class OpenAiCompatibleProvider(
                         }
                     }
                     close()
+                } catch (e: IOException) {
+                    // Mid-stream read failures (timeouts, dropped connections)
+                    // are network problems, not malformed data.
+                    close(LlmException.Network(e))
                 } catch (e: Exception) {
                     close(LlmException.ParseError(e))
                 } finally {

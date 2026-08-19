@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -15,6 +16,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -71,6 +73,17 @@ fun WordPreviewSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Lightweight loading indicator: a thin line while the MW entry or
+            // the streamed Chinese glosses are on the way.
+            if (uiState is DictionaryUiState.Loading || lookupInfoLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.Transparent
+                )
+            }
             when (val state = uiState) {
                 DictionaryUiState.Idle, DictionaryUiState.Loading -> {
                     Row(
@@ -150,7 +163,7 @@ private fun WordPreviewContent(
                     strings.addToFavorites
                 },
                 tint = if (isFavorite) {
-                    Color(0xFF00BCD4)
+                    MaterialTheme.colorScheme.secondary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
@@ -175,8 +188,12 @@ private fun WordPreviewContent(
     }
 
     if (lookupInfo != null) {
-        // LLM-produced Chinese glosses, Youdao-style.
+        // LLM-produced Chinese glosses, Youdao-style. They stream in line by
+        // line; the cursor stays visible until the stream finishes.
         WordLookupInfoContent(info = lookupInfo)
+        if (lookupInfoLoading) {
+            BlinkingCursor()
+        }
     } else if (lookupInfoLoading) {
         // MW result is already on screen; the Chinese glosses are on the way.
         BlinkingCursor()
