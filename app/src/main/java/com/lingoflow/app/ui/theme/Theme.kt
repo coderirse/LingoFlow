@@ -15,6 +15,7 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = LingoFlowSurfaceElevated,
     surfaceContainerLow = LingoFlowSurface,
     surfaceContainerHigh = LingoFlowSurfaceElevated,
+    outline = LingoFlowOutlineDark,
     onPrimary = LingoFlowOnSurface,
     onSecondary = LingoFlowOnSurface,
     onBackground = LingoFlowOnSurface,
@@ -23,13 +24,14 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = LingoFlowPrimary,
-    secondary = LingoFlowSecondary,
+    primary = LingoFlowPrimaryLight,
+    secondary = LingoFlowSecondaryLight,
     background = LingoFlowLightBackground,
     surface = LingoFlowLightSurface,
     surfaceVariant = LingoFlowLightSurfaceElevated,
-    surfaceContainerLow = LingoFlowLightBackground,
+    surfaceContainerLow = LingoFlowLightSurface,
     surfaceContainerHigh = LingoFlowLightSurfaceElevated,
+    outline = LingoFlowOutlineLight,
     onPrimary = LingoFlowLightSurface,
     onSecondary = LingoFlowLightSurface,
     onBackground = LingoFlowLightOnSurface,

@@ -224,6 +224,10 @@ private fun SettingsSection(
     Surface(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(

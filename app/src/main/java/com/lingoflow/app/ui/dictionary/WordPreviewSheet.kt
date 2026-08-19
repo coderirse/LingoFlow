@@ -163,7 +163,7 @@ private fun WordPreviewContent(
                     strings.addToFavorites
                 },
                 tint = if (isFavorite) {
-                    Color(0xFF00BCD4)
+                    MaterialTheme.colorScheme.secondary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }

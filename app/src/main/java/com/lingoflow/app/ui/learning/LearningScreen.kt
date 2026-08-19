@@ -1,5 +1,6 @@
 package com.lingoflow.app.ui.learning
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,7 +39,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
 import com.lingoflow.app.ui.i18n.LocalStrings
-import com.lingoflow.app.ui.theme.LingoFlowSecondary
 
 /**
  * Real Learning tab: favorited translations and favorited dictionary words,
@@ -156,7 +156,8 @@ private fun FavoriteTranslationCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(
             modifier = Modifier
@@ -187,7 +188,7 @@ private fun FavoriteTranslationCard(
                 Icon(
                     imageVector = Icons.Default.Favorite,
                     contentDescription = strings.removeFromFavorites,
-                    tint = LingoFlowSecondary
+                    tint = MaterialTheme.colorScheme.secondary
                 )
             }
         }
@@ -206,7 +207,8 @@ private fun FavoriteWordCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(
             modifier = Modifier
@@ -225,7 +227,7 @@ private fun FavoriteWordCard(
                 Icon(
                     imageVector = Icons.Default.Favorite,
                     contentDescription = strings.removeFromFavorites,
-                    tint = LingoFlowSecondary
+                    tint = MaterialTheme.colorScheme.secondary
                 )
             }
         }
