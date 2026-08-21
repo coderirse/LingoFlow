@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppLanguage
 import com.lingoflow.app.domain.model.settings.AppSettings
+import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.domain.model.translation.TranslationMode
@@ -54,6 +55,10 @@ class SettingsRepositoryImpl @Inject constructor(
             ?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() }
             ?: AppLanguage.ENGLISH
 
+        val interfaceStyle = prefs[KEY_INTERFACE_STYLE]
+            ?.let { runCatching { InterfaceStyle.valueOf(it) }.getOrNull() }
+            ?: InterfaceStyle.MODERN
+
         val providers = LlmProviderId.entries.associateWith { id ->
             ProviderConfig(
                 providerId = id,
@@ -71,7 +76,8 @@ class SettingsRepositoryImpl @Inject constructor(
             dictionaryApiKey = encryptedPrefs.getString(KEY_DICTIONARY_API_KEY, "") ?: "",
             defaultTranslationMode = defaultMode,
             themeMode = themeMode,
-            appLanguage = appLanguage
+            appLanguage = appLanguage,
+            interfaceStyle = interfaceStyle
         )
     }
 
@@ -81,6 +87,7 @@ class SettingsRepositoryImpl @Inject constructor(
             prefs[KEY_DEFAULT_MODE] = settings.defaultTranslationMode.name
             prefs[KEY_THEME_MODE] = settings.themeMode.name
             prefs[KEY_APP_LANGUAGE] = settings.appLanguage.name
+            prefs[KEY_INTERFACE_STYLE] = settings.interfaceStyle.name
             settings.llmProviders.forEach { (id, config) ->
                 config.baseUrl?.let { prefs[stringPreferencesKey(baseUrlKey(id))] = it }
                 prefs[stringPreferencesKey(modelKey(id))] = config.model
@@ -101,6 +108,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val KEY_DEFAULT_MODE = stringPreferencesKey("default_translation_mode")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
+        val KEY_INTERFACE_STYLE = stringPreferencesKey("interface_style")
         const val KEY_DICTIONARY_API_KEY = "dictionary_api_key"
 
         fun baseUrlKey(id: LlmProviderId) = "base_url_${id.name.lowercase()}"

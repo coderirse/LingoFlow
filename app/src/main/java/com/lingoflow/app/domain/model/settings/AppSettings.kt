@@ -10,5 +10,6 @@ data class AppSettings(
     val dictionaryApiKey: String,
     val defaultTranslationMode: TranslationMode = TranslationMode.STANDARD,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val appLanguage: AppLanguage = AppLanguage.ENGLISH
+    val appLanguage: AppLanguage = AppLanguage.ENGLISH,
+    val interfaceStyle: InterfaceStyle = InterfaceStyle.MODERN
 )

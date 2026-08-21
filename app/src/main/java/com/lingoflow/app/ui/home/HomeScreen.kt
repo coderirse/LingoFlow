@@ -6,7 +6,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,7 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -53,7 +50,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -135,6 +131,7 @@ fun HomeRoute(
         onSpeakClick = viewModel::onSpeakClick,
         onToggleFavoriteTranslation = viewModel::onToggleFavoriteTranslation,
         onCancelStreaming = viewModel::onCancelStreaming,
+        onCancelTranslation = viewModel::onCancelTranslation,
         onSettingsClick = onNavigateToSettings
     )
 }
@@ -155,6 +152,7 @@ fun HomeScreen(
     onSpeakClick: () -> Unit,
     onToggleFavoriteTranslation: () -> Unit,
     onCancelStreaming: () -> Unit,
+    onCancelTranslation: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -172,14 +170,17 @@ fun HomeScreen(
         }
     }
 
-    // Tap-to-lookup, stage one: compact preview card.
+    // Tap-to-lookup, stage one: compact preview card. The two sheets are
+    // mutually exclusive — stacking two modal sheets risks a stranded dim
+    // window that blacks out the whole screen until the app is killed.
     var fullLookupWord by remember { mutableStateOf<String?>(null) }
-    uiState.lookupWord?.let { word ->
+    val previewWord = uiState.lookupWord
+    if (previewWord != null) {
         WordPreviewSheet(
-            word = word,
+            word = previewWord,
             onDismiss = onLookupWordConsumed,
             onViewFullDefinition = {
-                fullLookupWord = word
+                fullLookupWord = previewWord
                 onLookupWordConsumed()
             },
             onGoToSettings = {
@@ -187,18 +188,18 @@ fun HomeScreen(
                 onSettingsClick()
             }
         )
-    }
-
-    // Tap-to-lookup, stage two: full dictionary sheet.
-    fullLookupWord?.let { word ->
-        DictionaryBottomSheet(
-            initialWord = word,
-            onDismiss = { fullLookupWord = null },
-            onGoToSettings = {
-                fullLookupWord = null
-                onSettingsClick()
-            }
-        )
+    } else {
+        // Tap-to-lookup, stage two: full dictionary sheet.
+        fullLookupWord?.let { word ->
+            DictionaryBottomSheet(
+                initialWord = word,
+                onDismiss = { fullLookupWord = null },
+                onGoToSettings = {
+                    fullLookupWord = null
+                    onSettingsClick()
+                }
+            )
+        }
     }
 
     Scaffold(
@@ -257,6 +258,7 @@ fun HomeScreen(
                 onSpeakClick = onSpeakClick,
                 onToggleFavoriteTranslation = onToggleFavoriteTranslation,
                 onCancelStreaming = onCancelStreaming,
+                onCancelTranslation = onCancelTranslation,
                 onGoToSettings = onSettingsClick,
                 modifier = Modifier
                     .fillMaxSize()
@@ -381,6 +383,7 @@ private fun TranslateTab(
     onSpeakClick: () -> Unit,
     onToggleFavoriteTranslation: () -> Unit,
     onCancelStreaming: () -> Unit,
+    onCancelTranslation: () -> Unit,
     onGoToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -399,14 +402,10 @@ private fun TranslateTab(
                 inputText = uiState.inputText,
                 onInputChange = onInputChange,
                 onClearInput = onClearInput,
-                onPaste = onPaste
-            )
-        }
-        item {
-            LanguageBar(
+                onPaste = onPaste,
                 sourceLanguage = uiState.sourceLanguage,
                 targetLanguage = uiState.targetLanguage,
-                enabled = !uiState.isTranslating,
+                languagesEnabled = !uiState.isTranslating,
                 onSourceLanguageChange = onSourceLanguageChange,
                 onTargetLanguageChange = onTargetLanguageChange,
                 onSwapLanguages = onSwapLanguages
@@ -422,7 +421,8 @@ private fun TranslateTab(
             TranslateButton(
                 uiState = uiState,
                 onTranslateClick = onTranslateClick,
-                onCancelStreaming = onCancelStreaming
+                onCancelStreaming = onCancelStreaming,
+                onCancelTranslation = onCancelTranslation
             )
         }
         item {
@@ -435,9 +435,7 @@ private fun TranslateTab(
                 onToggleFavorite = onToggleFavoriteTranslation
             )
         }
-        item {
-            DictionaryLookupSection(onGoToSettings = onGoToSettings)
-        }
+        item { LookupEntryBar(onGoToSettings = onGoToSettings) }
         item { Spacer(modifier = Modifier.height(20.dp)) }
         item { BrandingFooter() }
     }
@@ -448,7 +446,13 @@ private fun InputCard(
     inputText: String,
     onInputChange: (String) -> Unit,
     onClearInput: () -> Unit,
-    onPaste: () -> Unit
+    onPaste: () -> Unit,
+    sourceLanguage: Language,
+    targetLanguage: Language,
+    languagesEnabled: Boolean,
+    onSourceLanguageChange: (Language) -> Unit,
+    onTargetLanguageChange: (Language) -> Unit,
+    onSwapLanguages: () -> Unit
 ) {
     val strings = LocalStrings.current
     Card(
@@ -459,6 +463,47 @@ private fun InputCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // Language row lives inside the input card: one less card on screen.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LanguagePicker(
+                    selected = sourceLanguage,
+                    options = Language.entries,
+                    enabled = languagesEnabled,
+                    onSelected = onSourceLanguageChange,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = onSwapLanguages,
+                    enabled = languagesEnabled,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Swap languages",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                LanguagePicker(
+                    selected = targetLanguage,
+                    options = Language.targetSelectable,
+                    enabled = languagesEnabled,
+                    onSelected = onTargetLanguageChange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outline
+            )
+
             BasicTextField(
                 value = inputText,
                 onValueChange = onInputChange,
@@ -515,61 +560,6 @@ private fun InputCard(
 }
 
 @Composable
-private fun LanguageBar(
-    sourceLanguage: Language,
-    targetLanguage: Language,
-    enabled: Boolean,
-    onSourceLanguageChange: (Language) -> Unit,
-    onTargetLanguageChange: (Language) -> Unit,
-    onSwapLanguages: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            LanguagePicker(
-                selected = sourceLanguage,
-                options = Language.entries,
-                enabled = enabled,
-                onSelected = onSourceLanguageChange,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(
-                onClick = onSwapLanguages,
-                enabled = enabled,
-                modifier = Modifier
-                    .size(40.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Swap languages",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            LanguagePicker(
-                selected = targetLanguage,
-                options = Language.targetSelectable,
-                enabled = enabled,
-                onSelected = onTargetLanguageChange,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
 private fun LanguagePicker(
     selected: Language,
     options: List<Language>,
@@ -615,17 +605,17 @@ private fun ModeSelector(
     selected: TranslationMode,
     onModeChange: (TranslationMode) -> Unit
 ) {
+    // All five modes fit on one row — no horizontal scrolling.
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         TranslationMode.entries.forEach { mode ->
             ModeCard(
                 mode = mode,
                 isSelected = mode == selected,
-                onClick = { onModeChange(mode) }
+                onClick = { onModeChange(mode) },
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -640,9 +630,7 @@ private fun ModeCard(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier
-            .defaultMinSize(minWidth = 72.dp)
-            .height(48.dp),
+        modifier = modifier.height(40.dp),
         shape = RoundedCornerShape(12.dp),
         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
         border = if (isSelected) {
@@ -653,11 +641,11 @@ private fun ModeCard(
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
         ) {
             Text(
                 text = mode.displayName,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelSmall,
                 color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -670,11 +658,16 @@ private fun ModeCard(
 private fun TranslateButton(
     uiState: HomeUiState,
     onTranslateClick: () -> Unit,
-    onCancelStreaming: () -> Unit
+    onCancelStreaming: () -> Unit,
+    onCancelTranslation: () -> Unit
 ) {
     val strings = LocalStrings.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val enabled = uiState.isStreaming ||
+    // Streaming modes cancel the stream; LLM one-shot modes (LEARNING) cancel
+    // the request. On-device STANDARD runs to completion.
+    val cancellable = uiState.isStreaming ||
+        (uiState.isTranslating && uiState.translationMode != TranslationMode.STANDARD)
+    val enabled = cancellable ||
         (uiState.inputText.isNotBlank() && !uiState.isTranslating)
     val gradient = Brush.horizontalGradient(
         listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
@@ -682,11 +675,13 @@ private fun TranslateButton(
 
     Button(
         onClick = {
-            if (uiState.isStreaming) {
-                onCancelStreaming()
-            } else {
-                keyboardController?.hide()
-                onTranslateClick()
+            when {
+                uiState.isStreaming -> onCancelStreaming()
+                cancellable -> onCancelTranslation()
+                else -> {
+                    keyboardController?.hide()
+                    onTranslateClick()
+                }
             }
         },
         enabled = enabled,
@@ -707,18 +702,15 @@ private fun TranslateButton(
                 .fillMaxSize()
                 .then(
                     when {
-                        uiState.isStreaming ->
-                            Modifier.background(MaterialTheme.colorScheme.error)
-
+                        cancellable -> Modifier.background(MaterialTheme.colorScheme.error)
                         enabled -> Modifier.background(gradient)
-
                         else -> Modifier
                     }
                 ),
             contentAlignment = Alignment.Center
         ) {
             when {
-                uiState.isStreaming -> {
+                cancellable -> {
                     Text(strings.cancel, style = MaterialTheme.typography.titleMedium)
                 }
 
@@ -1010,8 +1002,7 @@ private fun TranslationResultCard(
 // Dictionary shortcut + branding
 // ---------------------------------------------------------------------------
 
-/** Renders [text] as individually tappable words for dictionary lookup. */
-@OptIn(ExperimentalLayoutApi::class)
+/** Renders [text] as individually tappable words for dictionary lookup. */@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ClickableWords(
     text: String,
@@ -1084,63 +1075,44 @@ private fun StreamingText(
     )
 }
 
+/**
+ * Lightweight dictionary lookup entry: a field-styled row that opens the full
+ * dictionary sheet on tap. The full search input lives in Learning → Words.
+ */
 @Composable
-private fun DictionaryLookupSection(
-    onGoToSettings: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun LookupEntryBar(onGoToSettings: () -> Unit) {
     val strings = LocalStrings.current
-    var word by remember { mutableStateOf("") }
     var showSheet by remember { mutableStateOf(false) }
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    Surface(
+        onClick = { showSheet = true },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = strings.dictionary,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = strings.lookUpWord,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = word,
-                    onValueChange = { word = it },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(56.dp),
-                    placeholder = { Text(strings.englishWordHint) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp)
-                )
-                IconButton(
-                    onClick = { showSheet = true },
-                    enabled = word.isNotBlank()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = strings.lookUpWord,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            Text(
+                text = strings.englishWordHint,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
     if (showSheet) {
         DictionaryBottomSheet(
-            initialWord = word,
+            initialWord = "",
             onDismiss = { showSheet = false },
             onGoToSettings = {
                 showSheet = false
@@ -1151,8 +1123,7 @@ private fun DictionaryLookupSection(
 }
 
 @Composable
-private fun BrandingFooter(modifier: Modifier = Modifier) {
-    val strings = LocalStrings.current
+private fun BrandingFooter(modifier: Modifier = Modifier) {    val strings = LocalStrings.current
     val context = LocalContext.current
 
     Column(
@@ -1214,6 +1185,7 @@ private fun HomeScreenPreview() {
             onSpeakClick = {},
             onToggleFavoriteTranslation = {},
             onCancelStreaming = {},
+            onCancelTranslation = {},
             onSettingsClick = {}
         )
     }

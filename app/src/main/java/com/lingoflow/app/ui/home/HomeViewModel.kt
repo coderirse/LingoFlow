@@ -164,7 +164,13 @@ class HomeViewModel @Inject constructor(
         streamJob?.cancel()
     }
 
+    /** Cancels an in-flight one-shot translation (e.g. LEARNING mode). */
+    fun onCancelTranslation() {
+        oneShotJob?.cancel()
+    }
+
     private var streamJob: kotlinx.coroutines.Job? = null
+    private var oneShotJob: kotlinx.coroutines.Job? = null
 
     private fun translatedTextOf(response: TranslationResponse): String =
         when (response) {
@@ -173,26 +179,32 @@ class HomeViewModel @Inject constructor(
         }
 
     private fun startOneShotTranslation(snapshot: HomeUiState) {
-        viewModelScope.launch {
+        oneShotJob = viewModelScope.launch {
             _uiState.update { it.copy(isTranslating = true, errorMessage = null) }
-            translateText(
-                TranslationRequest(
-                    text = snapshot.inputText,
-                    sourceLanguage = snapshot.sourceLanguage,
-                    targetLanguage = snapshot.targetLanguage,
-                    mode = snapshot.translationMode
-                )
-            ).onSuccess { response ->
-                onTranslationFinished(snapshot, translatedTextOf(response), response)
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        isTranslating = false,
-                        translationResponse = null,
-                        errorMessage = (error as? TranslationException)?.userMessage
-                            ?: "Translation failed. Please try again."
+            try {
+                translateText(
+                    TranslationRequest(
+                        text = snapshot.inputText,
+                        sourceLanguage = snapshot.sourceLanguage,
+                        targetLanguage = snapshot.targetLanguage,
+                        mode = snapshot.translationMode
                     )
+                ).onSuccess { response ->
+                    onTranslationFinished(snapshot, translatedTextOf(response), response)
+                }.onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isTranslating = false,
+                            translationResponse = null,
+                            errorMessage = (error as? TranslationException)?.userMessage
+                                ?: "Translation failed. Please try again."
+                        )
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // User cancelled: restore idle state, keep the previous result.
+                _uiState.update { it.copy(isTranslating = false) }
+                throw e
             }
         }
     }

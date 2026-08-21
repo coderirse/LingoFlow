@@ -26,6 +26,7 @@ fun SettingsRoute(
         onSaveSuccessConsumed = viewModel::consumeSaveSuccess,
         onCheckUpdates = viewModel::checkForUpdates,
         onThemeModeChange = viewModel::updateThemeMode,
-        onAppLanguageChange = viewModel::updateAppLanguage
+        onAppLanguageChange = viewModel::updateAppLanguage,
+        onInterfaceStyleChange = viewModel::updateInterfaceStyle
     )
 }

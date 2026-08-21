@@ -18,16 +18,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,8 +49,9 @@ import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
 import com.lingoflow.app.ui.i18n.LocalStrings
 
 /**
- * Real Learning tab: favorited translations and favorited dictionary words,
- * one list with two sections. Both hearts across the app feed this screen.
+ * Learning tab: favorite translations and favorite words live in separate
+ * sub-tabs instead of one mixed column. The word tab also hosts the manual
+ * dictionary lookup entry (moved from the home screen).
  */
 @Composable
 fun LearningRoute(
@@ -62,6 +71,7 @@ fun LearningRoute(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LearningScreen(
     words: List<String>,
@@ -72,56 +82,53 @@ fun LearningScreen(
     modifier: Modifier = Modifier
 ) {
     val strings = LocalStrings.current
+    var selectedSection by rememberSaveable { mutableIntStateOf(0) }
     var lookupWord by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    if (words.isEmpty() && translations.isEmpty()) {
-        Column(
-            modifier = modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+    Column(modifier = modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.FavoriteBorder,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(48.dp)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = strings.noFavoriteWords,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            SegmentedButton(
+                selected = selectedSection == 0,
+                onClick = { selectedSection = 0 },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            ) {
+                Text(strings.favoriteTranslationsSection, maxLines = 1)
+            }
+            SegmentedButton(
+                selected = selectedSection == 1,
+                onClick = { selectedSection = 1 },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            ) {
+                Text(strings.favoriteWordsSection, maxLines = 1)
+            }
         }
-    } else {
-        LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (translations.isNotEmpty()) {
-                item(key = "header_translations") {
-                    SectionHeader(strings.favoriteTranslationsSection)
-                }
-                items(translations, key = { "t_${it.id}" }) { item ->
-                    FavoriteTranslationCard(
-                        item = item,
-                        onRemove = { onRemoveTranslation(item.id) }
-                    )
-                }
-            }
-            if (words.isNotEmpty()) {
-                item(key = "header_words") {
-                    SectionHeader(strings.favoriteWordsSection)
-                }
-                items(words, key = { "w_$it" }) { word ->
-                    FavoriteWordCard(
-                        word = word,
-                        onClick = { lookupWord = word },
-                        onRemove = { onRemove(word) }
-                    )
-                }
-            }
+
+        when (selectedSection) {
+            0 -> TranslationsTab(
+                translations = translations,
+                onRemoveTranslation = onRemoveTranslation,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            else -> WordsTab(
+                words = words,
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                onSearch = {
+                    if (searchQuery.isNotBlank()) {
+                        lookupWord = searchQuery.trim().lowercase()
+                        searchQuery = ""
+                    }
+                },
+                onWordClick = { lookupWord = it },
+                onRemove = onRemove,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 
@@ -138,13 +145,111 @@ fun LearningScreen(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp)
-    )
+private fun TranslationsTab(
+    translations: List<TranslationHistoryItem>,
+    onRemoveTranslation: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val strings = LocalStrings.current
+    if (translations.isEmpty()) {
+        EmptyHint(text = strings.noFavoriteTranslations, modifier = modifier)
+    } else {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(translations, key = { it.id }) { item ->
+                FavoriteTranslationCard(
+                    item = item,
+                    onRemove = { onRemoveTranslation(item.id) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordsTab(
+    words: List<String>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onWordClick: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val strings = LocalStrings.current
+    Column(modifier = modifier) {
+        // Manual dictionary lookup entry (moved from the home screen).
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp),
+                placeholder = { Text(strings.englishWordHint) },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
+            )
+            IconButton(onClick = onSearch, enabled = searchQuery.isNotBlank()) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = strings.lookUpWord,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        if (words.isEmpty()) {
+            EmptyHint(
+                text = strings.noFavoriteWords,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(words, key = { it }) { word ->
+                    FavoriteWordCard(
+                        word = word,
+                        onClick = { onWordClick(word) },
+                        onRemove = { onRemove(word) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyHint(text: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.FavoriteBorder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(48.dp)
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 @Composable

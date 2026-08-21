@@ -6,6 +6,7 @@ import com.lingoflow.app.data.update.UpdateChecker
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppLanguage
 import com.lingoflow.app.domain.model.settings.AppSettings
+import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.domain.model.translation.TranslationMode
@@ -75,6 +76,14 @@ class SettingsViewModel @Inject constructor(
     /** Theme changes apply instantly, so persist them right away. */
     fun updateThemeMode(mode: ThemeMode) {
         mutateSettings { it.copy(themeMode = mode) }
+        viewModelScope.launch {
+            settingsRepository.saveSettings(_uiState.value.settings)
+        }
+    }
+
+    /** Interface style changes apply instantly, so persist them right away. */
+    fun updateInterfaceStyle(style: InterfaceStyle) {
+        mutateSettings { it.copy(interfaceStyle = style) }
         viewModelScope.launch {
             settingsRepository.saveSettings(_uiState.value.settings)
         }

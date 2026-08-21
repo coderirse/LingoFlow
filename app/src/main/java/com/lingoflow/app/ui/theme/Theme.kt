@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ThemeMode
 
 private val DarkColorScheme = darkColorScheme(
@@ -39,9 +40,42 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant = LingoFlowLightOnSurfaceVariant
 )
 
+private val EditorialDarkColorScheme = darkColorScheme(
+    primary = EditorialDarkPrimary,
+    secondary = EditorialDarkSecondary,
+    background = EditorialDarkBackground,
+    surface = EditorialDarkSurface,
+    surfaceVariant = EditorialDarkElevated,
+    surfaceContainerLow = EditorialDarkSurface,
+    surfaceContainerHigh = EditorialDarkElevated,
+    outline = EditorialDarkOutline,
+    onPrimary = EditorialDarkBackground,
+    onSecondary = EditorialDarkBackground,
+    onBackground = EditorialDarkOnSurface,
+    onSurface = EditorialDarkOnSurface,
+    onSurfaceVariant = EditorialDarkOnSurfaceVariant
+)
+
+private val EditorialLightColorScheme = lightColorScheme(
+    primary = EditorialLightPrimary,
+    secondary = EditorialLightSecondary,
+    background = EditorialLightBackground,
+    surface = EditorialLightSurface,
+    surfaceVariant = EditorialLightElevated,
+    surfaceContainerLow = EditorialLightSurface,
+    surfaceContainerHigh = EditorialLightElevated,
+    outline = EditorialLightOutline,
+    onPrimary = EditorialLightSurface,
+    onSecondary = EditorialLightSurface,
+    onBackground = EditorialLightOnSurface,
+    onSurface = EditorialLightOnSurface,
+    onSurfaceVariant = EditorialLightOnSurfaceVariant
+)
+
 @Composable
 fun LingoFlowTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    interfaceStyle: InterfaceStyle = InterfaceStyle.MODERN,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -49,11 +83,19 @@ fun LingoFlowTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val colorScheme = when (interfaceStyle) {
+        InterfaceStyle.MODERN -> if (darkTheme) DarkColorScheme else LightColorScheme
+        InterfaceStyle.EDITORIAL ->
+            if (darkTheme) EditorialDarkColorScheme else EditorialLightColorScheme
+    }
+    val typography = when (interfaceStyle) {
+        InterfaceStyle.MODERN -> Typography
+        InterfaceStyle.EDITORIAL -> EditorialTypography
+    }
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = typography,
         content = content
     )
 }

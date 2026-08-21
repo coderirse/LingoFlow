@@ -498,6 +498,39 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `cancelling a one-shot translation restores idle state`() = runTest {
+        // LLM one-shot (LEARNING) that never answers: cancel must restore idle.
+        val stallingEngine = object : TranslationEngine {
+            override val status: StateFlow<TranslationStatus> =
+                MutableStateFlow(TranslationStatus.IDLE)
+
+            override suspend fun translate(
+                request: TranslationRequest
+            ): Result<TranslationResponse> {
+                kotlinx.coroutines.delay(120_000)
+                error("unreachable")
+            }
+        }
+        val bundle = createViewModel(engine = stallingEngine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("天若有情天亦老")
+        bundle.viewModel.onModeChange(TranslationMode.LEARNING)
+        bundle.viewModel.onTranslateClick()
+        runCurrent()
+
+        assertTrue(bundle.viewModel.uiState.value.isTranslating)
+
+        bundle.viewModel.onCancelTranslation()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isTranslating)
+        assertNull(state.translationResponse)
+        assertTrue(bundle.history.getAllHistory().first().isEmpty())
+    }
+
+    @Test
     fun `hung word lookup is capped by timeout and loading settles`() = runTest {
         // Lookup that never answers: the 20s guard must settle the UI.
         val hangingLookup = object : com.lingoflow.app.domain.usecase.LookupWordUseCase(

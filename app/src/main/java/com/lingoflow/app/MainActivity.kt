@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.model.settings.AppLanguage
+import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.domain.repository.SettingsRepository
 import com.lingoflow.app.ui.i18n.LocalStrings
@@ -35,10 +36,11 @@ class MainActivity : ComponentActivity() {
                 .collectAsStateWithLifecycle(initialValue = null)
 
             val themeMode = settings?.themeMode ?: ThemeMode.SYSTEM
+            val interfaceStyle = settings?.interfaceStyle ?: InterfaceStyle.MODERN
             val strings = stringsFor(settings?.appLanguage ?: AppLanguage.ENGLISH)
 
             CompositionLocalProvider(LocalStrings provides strings) {
-                LingoFlowTheme(themeMode = themeMode) {
+                LingoFlowTheme(themeMode = themeMode, interfaceStyle = interfaceStyle) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background

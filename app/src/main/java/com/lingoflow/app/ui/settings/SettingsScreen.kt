@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppLanguage
+import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ThemeMode
 import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.domain.model.translation.TranslationMode
@@ -74,6 +75,7 @@ fun SettingsScreen(
     onCheckUpdates: () -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onAppLanguageChange: (AppLanguage) -> Unit,
+    onInterfaceStyleChange: (InterfaceStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val strings = LocalStrings.current
@@ -181,6 +183,10 @@ fun SettingsScreen(
                     AppLanguageDropdown(
                         selected = uiState.settings.appLanguage,
                         onSelected = onAppLanguageChange
+                    )
+                    InterfaceStyleDropdown(
+                        selected = uiState.settings.interfaceStyle,
+                        onSelected = onInterfaceStyleChange
                     )
                 }
             }
@@ -536,6 +542,55 @@ private fun AppLanguageDropdown(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InterfaceStyleDropdown(
+    selected: InterfaceStyle,
+    onSelected: (InterfaceStyle) -> Unit
+) {
+    val strings = LocalStrings.current
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (selected) {
+        InterfaceStyle.MODERN -> strings.styleModern
+        InterfaceStyle.EDITORIAL -> strings.styleEditorial
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(strings.interfaceStyle) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text(strings.styleModern) },
+                onClick = {
+                    onSelected(InterfaceStyle.MODERN)
+                    expanded = false
+                }
+            )
+            DropdownMenuItem(
+                text = { Text(strings.styleEditorial) },
+                onClick = {
+                    onSelected(InterfaceStyle.EDITORIAL)
+                    expanded = false
+                }
+            )
+        }
+    }
+}
+
 private fun providerDisplayName(providerId: LlmProviderId): String = when (providerId) {
     LlmProviderId.DEEPSEEK -> "DeepSeek"
     LlmProviderId.OPENAI -> "OpenAI"
@@ -563,7 +618,8 @@ private fun SettingsScreenPreview() {
             onSaveSuccessConsumed = {},
             onCheckUpdates = {},
             onThemeModeChange = {},
-            onAppLanguageChange = {}
+            onAppLanguageChange = {},
+            onInterfaceStyleChange = {}
         )
     }
 }
