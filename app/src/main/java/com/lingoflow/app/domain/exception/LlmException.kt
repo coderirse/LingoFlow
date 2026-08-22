@@ -13,4 +13,7 @@ sealed class LlmException(
     class Network(cause: Throwable? = null) : LlmException("Network error", cause)
 
     class ParseError(cause: Throwable) : LlmException("Failed to parse response", cause)
+
+    /** finish_reason == "length": the model hit its output token cap. */
+    class Truncated : LlmException("Output was cut off by the model's output limit")
 }

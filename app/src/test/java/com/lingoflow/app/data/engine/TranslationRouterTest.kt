@@ -10,6 +10,7 @@ import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.translation.TranslationMode
+import com.lingoflow.app.domain.model.translation.TranslationNotices
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -52,8 +53,11 @@ class TranslationRouterTest {
         )
     }
 
-    private fun request(mode: TranslationMode) = TranslationRequest(
-        text = "Hello",
+    private fun request(
+        mode: TranslationMode,
+        text: String = "Hello"
+    ) = TranslationRequest(
+        text = text,
         sourceLanguage = Language.ENGLISH,
         targetLanguage = Language.CHINESE,
         mode = mode
@@ -72,6 +76,74 @@ class TranslationRouterTest {
     }
 
     @Test
+    fun `long standard mode with api key uses the llm engine`() = runTest {
+        val router = createRouter(apiKey = "sk-test")
+
+        val result = router.translate(
+            request(TranslationMode.STANDARD, "a".repeat(500))
+        )
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow() as TranslationResponse.Standard
+        assertEquals("llm result", response.translatedText)
+    }
+
+    @Test
+    fun `long standard mode without api key falls back to ml kit with a notice`() = runTest {
+        val longText = "a".repeat(500)
+        val router = createRouter(apiKey = "")
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val result = router.translate(
+            request(TranslationMode.STANDARD, longText)
+        )
+        advanceUntilIdle()
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow() as TranslationResponse.Standard
+        assertEquals("[Fake Translation] $longText", response.translatedText)
+        assertEquals(
+            listOf(TranslationNotices.LLM_KEY_MISSING),
+            received
+        )
+        job.cancel()
+    }
+
+    @Test
+    fun `long standard mode falls back to ml kit when llm fails`() = runTest {
+        val longText = "a".repeat(500)
+        val provider = FakeLlmProvider(
+            chatError = IllegalStateException("boom")
+        )
+        val router = TranslationRouter(
+            mlKitEngine = MlKitTranslationEngine(FakeTranslator()),
+            llmEngine = LlmTranslationEngine(settingsWithKey("sk-test")) { provider },
+            settingsRepository = settingsWithKey("sk-test")
+        )
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val result = router.translate(
+            request(TranslationMode.STANDARD, longText)
+        )
+        advanceUntilIdle()
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow() as TranslationResponse.Standard
+        assertEquals("[Fake Translation] $longText", response.translatedText)
+        assertEquals(
+            listOf(TranslationNotices.LLM_FAILED),
+            received
+        )
+        job.cancel()
+    }
+
+    @Test
     fun `llm mode without api key falls back to ml kit with a notice`() = runTest {
         val router = createRouter(apiKey = "")
         val received = mutableListOf<String>()
@@ -86,7 +158,7 @@ class TranslationRouterTest {
         val response = result.getOrThrow() as TranslationResponse.Standard
         assertEquals("你好", response.translatedText)
         assertEquals(
-            listOf("LLM API key not set. Using on-device translation."),
+            listOf(TranslationNotices.LLM_KEY_MISSING),
             received
         )
         job.cancel()
@@ -138,6 +210,13 @@ class TranslationRouterStreamTest {
         mode = TranslationMode.NATURAL
     )
 
+    private fun standardRequest(text: String) = TranslationRequest(
+        text = text,
+        sourceLanguage = Language.ENGLISH,
+        targetLanguage = Language.CHINESE,
+        mode = TranslationMode.STANDARD
+    )
+
     @Test
     fun `stream with api key emits llm deltas`() = runTest {
         val router = createRouter("sk-test", flowOf("你", "好"))
@@ -160,7 +239,78 @@ class TranslationRouterStreamTest {
 
         assertEquals(listOf("你好"), deltas)
         assertEquals(
-            listOf("LLM API key not set. Using on-device translation."),
+            listOf(TranslationNotices.LLM_KEY_MISSING),
+            received
+        )
+        job.cancel()
+    }
+
+    @Test
+    fun `long standard stream with api key emits llm deltas`() = runTest {
+        val longText = "a".repeat(TranslationRouter.LONG_TEXT_MIN_LENGTH)
+        val router = createRouter("sk-test", flowOf("第一段。", "\n\n", "第二段。"))
+
+        val deltas = router.translateStream(standardRequest(longText)).toList()
+
+        assertEquals(listOf("第一段。", "\n\n", "第二段。"), deltas)
+    }
+
+    @Test
+    fun `short standard stream stays on ml kit even with api key`() = runTest {
+        val router = createRouter("sk-test", flowOf("should", "not", "emit"))
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val deltas = router.translateStream(standardRequest("Hello")).toList()
+        advanceUntilIdle()
+
+        // Single on-device emission, and no fallback notice: short STANDARD
+        // never intended to use the LLM.
+        assertEquals(listOf("你好"), deltas)
+        assertTrue(received.isEmpty())
+        job.cancel()
+    }
+
+    @Test
+    fun `long standard stream without api key falls back to ml kit`() = runTest {
+        val longText = "a".repeat(TranslationRouter.LONG_TEXT_MIN_LENGTH)
+        val router = createRouter("", flowOf("should", "not", "emit"))
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val deltas = router.translateStream(standardRequest(longText)).toList()
+        advanceUntilIdle()
+
+        assertEquals(listOf("[Fake Translation] $longText"), deltas)
+        assertEquals(
+            listOf(TranslationNotices.LLM_KEY_MISSING),
+            received
+        )
+        job.cancel()
+    }
+
+    @Test
+    fun `long standard stream falls back when llm fails before emitting`() = runTest {
+        val longText = "a".repeat(TranslationRouter.LONG_TEXT_MIN_LENGTH)
+        val failingStream = kotlinx.coroutines.flow.flow<String> {
+            throw IllegalStateException("boom")
+        }
+        val router = createRouter("sk-test", failingStream)
+        val received = mutableListOf<String>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            router.fallbackMessages.collect { received += it }
+        }
+
+        val deltas = router.translateStream(standardRequest(longText)).toList()
+        advanceUntilIdle()
+
+        assertEquals(listOf("[Fake Translation] $longText"), deltas)
+        assertEquals(
+            listOf(TranslationNotices.LLM_FAILED),
             received
         )
         job.cancel()

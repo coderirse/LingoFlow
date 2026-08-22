@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -68,6 +69,60 @@ class LlmTranslationEngineTest {
         // The system prompt must describe a natural-register translation.
         val systemPrompt = provider.lastRequest!!.messages.first().content
         assertTrue(systemPrompt.contains("naturally"))
+    }
+
+    @Test
+    fun `standard mode returns Standard response with layout prompt`() = runTest {
+        val provider = FakeLlmProvider(
+            chatResult = ChatResponse(
+                "第一段。\n\n第二段。",
+                finishReason = "stop",
+                usage = null
+            )
+        )
+        val engine = engineWith(provider)
+
+        val result = engine.translate(request(TranslationMode.STANDARD))
+
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow() as TranslationResponse.Standard
+        assertEquals("第一段。\n\n第二段。", response.translatedText)
+
+        val systemPrompt = provider.lastRequest!!.messages.first().content
+        assertTrue(systemPrompt.contains("organize the layout"))
+        assertTrue(systemPrompt.contains("split it into paragraphs"))
+        assertTrue(systemPrompt.contains("one item per line"))
+    }
+
+    @Test
+    fun `standard mode raises max tokens, other modes do not`() = runTest {
+        val provider = FakeLlmProvider()
+        val engine = engineWith(provider)
+
+        engine.translate(request(TranslationMode.STANDARD))
+        assertEquals(8192, provider.lastRequest!!.maxTokens)
+
+        engine.translate(request(TranslationMode.NATURAL))
+        assertNull(provider.lastRequest!!.maxTokens)
+    }
+
+    @Test
+    fun `truncated chat response fails instead of returning a partial success`() = runTest {
+        val provider = FakeLlmProvider(
+            chatResult = ChatResponse(
+                "被截断的译文",
+                finishReason = "length",
+                usage = null
+            )
+        )
+        val engine = engineWith(provider)
+
+        val result = engine.translate(request(TranslationMode.STANDARD))
+
+        assertTrue(result.isFailure)
+        assertTrue(
+            result.exceptionOrNull()!!.message!!.contains("cut off")
+        )
     }
 
     @Test
@@ -167,15 +222,27 @@ class LlmTranslationEngineStreamTest {
     }
 
     @Test
-    fun `standard mode stream is rejected`() = runTest {
+    fun `standard mode streams with the layout prompt`() = runTest {
+        val provider = FakeLlmProvider(streamFlow = flowOf("第一段。", "\n\n", "第二段。"))
+        val engine = LlmTranslationEngine(settingsWithKey("sk-test")) { provider }
+
+        val deltas = engine.translateStream(request(TranslationMode.STANDARD)).toList()
+
+        assertEquals(listOf("第一段。", "\n\n", "第二段。"), deltas)
+        val systemPrompt = provider.lastRequest!!.messages.first().content
+        assertTrue(systemPrompt.contains("organize the layout"))
+    }
+
+    @Test
+    fun `learning mode stream is rejected`() = runTest {
         val provider = FakeLlmProvider()
         val engine = LlmTranslationEngine(settingsWithKey("sk-test")) { provider }
 
         try {
-            engine.translateStream(request(TranslationMode.STANDARD)).toList()
+            engine.translateStream(request(TranslationMode.LEARNING)).toList()
             fail("Expected IllegalArgumentException")
         } catch (e: IllegalArgumentException) {
-            // expected: STANDARD stays on the non-streaming path
+            // expected: LEARNING needs its whole JSON answer at once
         }
     }
 }

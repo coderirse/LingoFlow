@@ -4,6 +4,7 @@ import com.lingoflow.app.data.repository.FakeHistoryRepository
 import com.lingoflow.app.data.repository.FakeSettingsRepository
 import com.lingoflow.app.data.translator.FakeTranslator
 import com.lingoflow.app.data.tts.FakeTtsEngine
+import com.lingoflow.app.data.tts.TtsPlaybackState
 import com.lingoflow.app.domain.engine.MlKitTranslationEngine
 import com.lingoflow.app.domain.engine.TranslationEngine
 import com.lingoflow.app.domain.model.Language
@@ -327,8 +328,73 @@ class HomeViewModelTest {
         advanceUntilIdle()
 
         bundle.viewModel.onSpeakClick()
+        advanceUntilIdle()
 
         assertEquals(listOf("你好"), bundle.tts.spoken)
+        assertEquals(
+            TtsPlaybackState.SPEAKING,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+    }
+
+    @Test
+    fun `speak button stops and can start again from the beginning`() = runTest {
+        val bundle = createViewModel()
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        bundle.viewModel.onSpeakClick()
+        advanceUntilIdle()
+        assertEquals(
+            TtsPlaybackState.SPEAKING,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+
+        bundle.viewModel.onSpeakClick()
+        advanceUntilIdle()
+        assertEquals(
+            TtsPlaybackState.IDLE,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+
+        bundle.viewModel.onSpeakClick()
+        advanceUntilIdle()
+        assertEquals(listOf("你好", "你好"), bundle.tts.spoken)
+        assertEquals(
+            TtsPlaybackState.SPEAKING,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+    }
+
+    @Test
+    fun `switching translation mode stops playback`() = runTest {
+        val bundle = createViewModel()
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+        bundle.viewModel.onSpeakClick()
+        advanceUntilIdle()
+
+        bundle.viewModel.onModeChange(TranslationMode.NATURAL)
+        advanceUntilIdle()
+
+        assertEquals(
+            TtsPlaybackState.IDLE,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+    }
+
+    @Test
+    fun `tts readiness updates reactively`() = runTest {
+        val bundle = createViewModel(tts = FakeTtsEngine(ready = false))
+        advanceUntilIdle()
+        assertFalse(bundle.viewModel.uiState.value.ttsReady)
+
+        bundle.tts.setReady(true)
+        advanceUntilIdle()
+
+        assertTrue(bundle.viewModel.uiState.value.ttsReady)
     }
 
     /** Engine that streams scripted deltas, optionally stalling mid-stream. */
@@ -375,6 +441,49 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `long standard text streams and finalizes formatted`() = runTest {
+        // The model streams literal "\n" escapes; the finalized result must
+        // come out with real newlines via LongTextFormatter.
+        val engine = FakeStreamingEngine(
+            deltas = listOf("第一段。", "\\n\\n", "第二段。"),
+            stallAfterFirst = true
+        )
+        val bundle = createViewModel(engine = engine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("word ".repeat(120)) // ≥500 chars
+        bundle.viewModel.onTranslateClick()
+        runCurrent()
+
+        // The first delta is on screen while the stream is stalled.
+        assertTrue(bundle.viewModel.uiState.value.isStreaming)
+        assertEquals("第一段。", bundle.viewModel.uiState.value.streamingText)
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isStreaming)
+        assertEquals("第一段。\n\n第二段。", state.translatedText)
+        assertEquals(
+            "第一段。\n\n第二段。",
+            bundle.history.getAllHistory().first().single().translatedText
+        )
+    }
+
+    @Test
+    fun `short standard text stays on the one-shot path`() = runTest {
+        val engine = FakeStreamingEngine(listOf("should", "not", "stream"))
+        val bundle = createViewModel(engine = engine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onTranslateClick()
+        runCurrent()
+
+        // Short STANDARD translates one-shot: no streaming state is set.
+        assertFalse(bundle.viewModel.uiState.value.isStreaming)
+    }
+
+    @Test
     fun `cancelling a stream keeps partial text and skips history`() = runTest {
         val bundle = createViewModel(
             engine = FakeStreamingEngine(listOf("你", "好"), stallAfterFirst = true)
@@ -397,7 +506,85 @@ class HomeViewModelTest {
         val state = bundle.viewModel.uiState.value
         assertFalse(state.isStreaming)
         assertFalse(state.isTranslating)
+        // The partial text stays on screen as a plain (unsaved) result.
+        val response = state.translationResponse
+        assertTrue(response is TranslationResponse.Standard)
+        assertEquals("你", (response as TranslationResponse.Standard).translatedText)
         assertTrue(bundle.history.getAllHistory().first().isEmpty())
+    }
+
+    @Test
+    fun `stream failure after partial output keeps the partial and shows a notice`() = runTest {
+        val engine = object : TranslationEngine,
+            com.lingoflow.app.domain.engine.StreamingTranslationEngine {
+            override val status: StateFlow<TranslationStatus> =
+                MutableStateFlow(TranslationStatus.IDLE)
+
+            override suspend fun translate(
+                request: TranslationRequest
+            ): Result<TranslationResponse> =
+                Result.success(TranslationResponse.Standard("unused"))
+
+            override fun translateStream(
+                request: TranslationRequest
+            ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
+                emit("部分")
+                throw com.lingoflow.app.domain.model.TranslationException(
+                    "Network error. Please check your connection."
+                )
+            }
+        }
+        val bundle = createViewModel(engine = engine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onModeChange(TranslationMode.NATURAL)
+        bundle.viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isTranslating)
+        assertNull(state.errorMessage)
+        val response = state.translationResponse
+        assertTrue(response is TranslationResponse.Standard)
+        assertEquals("部分", (response as TranslationResponse.Standard).translatedText)
+        assertEquals(
+            com.lingoflow.app.domain.model.translation.TranslationNotices.STREAM_INTERRUPTED,
+            state.snackbarMessage
+        )
+        // Interrupted results never reach history.
+        assertTrue(bundle.history.getAllHistory().first().isEmpty())
+    }
+
+    @Test
+    fun `finishing a translation stops ongoing tts playback`() = runTest {
+        val bundle = createViewModel(
+            engine = FakeStreamingEngine(listOf("你", "好"), stallAfterFirst = true)
+        )
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("Hello")
+        bundle.viewModel.onModeChange(TranslationMode.NATURAL)
+        bundle.viewModel.onTranslateClick()
+        // First delta in, stream now stalled mid-translation.
+        runCurrent()
+        assertTrue(bundle.viewModel.uiState.value.isStreaming)
+
+        // Speech started while the translation is still running.
+        bundle.tts.speak("旧的译文")
+        runCurrent() // let the playback-state collector propagate
+        assertEquals(
+            TtsPlaybackState.SPEAKING,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+
+        advanceUntilIdle()
+
+        // The finished result replaced the screen; speech must have stopped.
+        assertEquals(
+            TtsPlaybackState.IDLE,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
     }
 
     @Test
@@ -516,6 +703,39 @@ class HomeViewModelTest {
 
         bundle.viewModel.onInputChange("天若有情天亦老")
         bundle.viewModel.onModeChange(TranslationMode.LEARNING)
+        bundle.viewModel.onTranslateClick()
+        runCurrent()
+
+        assertTrue(bundle.viewModel.uiState.value.isTranslating)
+
+        bundle.viewModel.onCancelTranslation()
+        advanceUntilIdle()
+
+        val state = bundle.viewModel.uiState.value
+        assertFalse(state.isTranslating)
+        assertNull(state.translationResponse)
+        assertTrue(bundle.history.getAllHistory().first().isEmpty())
+    }
+
+    @Test
+    fun `cancelling a standard one-shot translation restores idle state`() = runTest {
+        // Long STANDARD texts go through the LLM one-shot path too: cancel
+        // must behave exactly like the other one-shot modes.
+        val stallingEngine = object : TranslationEngine {
+            override val status: StateFlow<TranslationStatus> =
+                MutableStateFlow(TranslationStatus.IDLE)
+
+            override suspend fun translate(
+                request: TranslationRequest
+            ): Result<TranslationResponse> {
+                kotlinx.coroutines.delay(120_000)
+                error("unreachable")
+            }
+        }
+        val bundle = createViewModel(engine = stallingEngine)
+        advanceUntilIdle()
+
+        bundle.viewModel.onInputChange("a".repeat(600))
         bundle.viewModel.onTranslateClick()
         runCurrent()
 

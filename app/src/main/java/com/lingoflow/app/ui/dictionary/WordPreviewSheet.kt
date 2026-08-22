@@ -58,6 +58,7 @@ fun WordPreviewSheet(
     val lookupInfo by viewModel.lookupInfo.collectAsStateWithLifecycle()
     val lookupInfoUnavailable by viewModel.lookupInfoUnavailable.collectAsStateWithLifecycle()
     val lookupInfoLoading by viewModel.lookupInfoLoading.collectAsStateWithLifecycle()
+    val ttsReady by viewModel.ttsReady.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
 
     LaunchedEffect(word) {
@@ -105,7 +106,7 @@ fun WordPreviewSheet(
                         lookupInfoUnavailable = lookupInfoUnavailable,
                         lookupInfoLoading = lookupInfoLoading,
                         isFavorite = entry.word.trim().lowercase() in favorites,
-                        ttsReady = viewModel.ttsReady,
+                        ttsReady = ttsReady,
                         onToggleFavorite = { viewModel.toggleFavorite(entry.word) },
                         onSpeak = { viewModel.speak(entry.word) },
                         onViewFullDefinition = onViewFullDefinition
@@ -115,6 +116,9 @@ fun WordPreviewSheet(
                 is DictionaryUiState.Error -> {
                     WordPreviewError(
                         error = state.error,
+                        word = word,
+                        ttsReady = ttsReady,
+                        onSpeak = { viewModel.speak(word) },
                         onGoToSettings = {
                             onDismiss()
                             onGoToSettings()
@@ -171,19 +175,21 @@ private fun WordPreviewContent(
         }
     }
 
-    entry.phonetics.firstOrNull()?.let { phonetic ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    // Pronunciation never depends on phonetic data: entries without a
+    // phonetic transcription must still offer the TTS play button.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        entry.phonetics.firstOrNull()?.let { phonetic ->
             Text(
                 text = phonetic.text,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            IconButton(onClick = onSpeak, enabled = ttsReady) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = strings.playPronunciation
-                )
-            }
+        }
+        IconButton(onClick = onSpeak, enabled = ttsReady) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = strings.playPronunciation
+            )
         }
     }
 
@@ -244,10 +250,19 @@ private fun WordPreviewContent(
 @Composable
 private fun WordPreviewError(
     error: DictionaryException,
+    word: String,
+    ttsReady: Boolean,
+    onSpeak: () -> Unit,
     onGoToSettings: () -> Unit
 ) {
     val strings = LocalStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Pronunciation does not depend on the lookup succeeding.
+        WordPronunciationHeader(
+            word = word,
+            ttsReady = ttsReady,
+            onSpeak = onSpeak
+        )
         val message = when (error) {
             is DictionaryException.NoApiKey -> strings.noApiKey
             is DictionaryException.NotFound ->

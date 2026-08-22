@@ -8,13 +8,14 @@ import com.lingoflow.app.domain.model.llm.TokenUsage
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import java.io.IOException
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -54,45 +55,56 @@ class OpenAiCompatibleProvider(
         (config.baseUrl?.ifBlank { null } ?: config.providerId.defaultBaseUrl).trimEnd('/')
 
     override suspend fun chat(request: ChatRequest): ChatResponse =
-        // enqueue's callback resumes the coroutine on the caller's dispatcher
-        // (Main for ViewModel callers), and body.string() below is a BLOCKING
-        // read — the response body is not downloaded yet when onResponse
-        // fires. On Main this freezes the whole UI for the entire download
-        // (ANR). Force the call and the body read onto the IO dispatcher.
-        withContext(Dispatchers.IO) {
+        // The whole call — including the blocking body download and JSON
+        // parse — runs on OkHttp's own threads; only the finished
+        // ChatResponse resumes the caller. The caller therefore never sits
+        // inside a blocking read, and cancelling it cancels the HTTP call,
+        // which aborts the download immediately. (Resuming the caller at
+        // onResponse and reading the body on the caller's dispatcher used
+        // to leave cancellation waiting for the full body download.)
+        suspendCancellableCoroutine { continuation ->
             val httpRequest = Request.Builder()
                 .url("$baseUrl/chat/completions")
                 .header("Authorization", "Bearer ${config.apiKey}")
                 .post(buildRequestBody(request, stream = false))
                 .build()
 
-            val response = try {
-                client.newCall(httpRequest).await()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: IOException) {
-                throw LlmException.Network(e)
-            }
-
-            response.use {
-                throwForHttpError(it.code)
-                val body = it.body?.string().orEmpty()
-                try {
-                    val parsed = json.decodeFromString<ChatCompletionResponse>(body)
-                    ChatResponse(
-                        content = parsed.choices.firstOrNull()?.message?.content.orEmpty(),
-                        finishReason = parsed.choices.firstOrNull()?.finishReason,
-                        usage = parsed.usage?.let { u ->
-                            TokenUsage(u.promptTokens, u.completionTokens)
-                        }
-                    )
-                } catch (e: Exception) {
-                    throw LlmException.ParseError(e)
+            val call = client.newCall(httpRequest)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onResponse(call: Call, response: Response) {
+                    val outcome = runCatching { parseBody(response) }
+                    if (continuation.isActive) {
+                        continuation.resumeWith(outcome)
+                    }
                 }
-            }
+
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(LlmException.Network(e))
+                    }
+                }
+            })
         }
 
-    override suspend fun chatStream(request: ChatRequest): Flow<String> = callbackFlow {
+    private fun parseBody(response: Response): ChatResponse = response.use {
+        throwForHttpError(it.code)
+        val body = it.body?.string().orEmpty()
+        try {
+            val parsed = json.decodeFromString<ChatCompletionResponse>(body)
+            ChatResponse(
+                content = parsed.choices.firstOrNull()?.message?.content.orEmpty(),
+                finishReason = parsed.choices.firstOrNull()?.finishReason,
+                usage = parsed.usage?.let { u ->
+                    TokenUsage(u.promptTokens, u.completionTokens)
+                }
+            )
+        } catch (e: Exception) {
+            throw LlmException.ParseError(e)
+        }
+    }
+
+    override suspend fun chatStream(request: ChatRequest): Flow<String> = channelFlow {
         val httpRequest = Request.Builder()
             .url("$baseUrl/chat/completions")
             .header("Authorization", "Bearer ${config.apiKey}")
@@ -100,14 +112,17 @@ class OpenAiCompatibleProvider(
             .build()
 
         val call = client.newCall(httpRequest)
-        call.enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                if (!response.isSuccessful) {
-                    close(runCatching { throwForHttpError(response.code) }.exceptionOrNull())
-                    response.close()
-                    return
-                }
-                try {
+        // The SSE loop runs on IO and suspends in send(): backpressure
+        // instead of the lossy trySend, so a slow collector can never drop
+        // a delta (one dropped character is a typo in the translation).
+        launch(Dispatchers.IO) {
+            try {
+                call.await().use { response ->
+                    if (!response.isSuccessful) {
+                        throwForHttpError(response.code)
+                        return@use
+                    }
+                    var lastFinishReason: String? = null
                     response.body?.source()?.use { source ->
                         while (!source.exhausted()) {
                             val line = source.readUtf8Line() ?: break
@@ -115,30 +130,51 @@ class OpenAiCompatibleProvider(
                             val data = line.removePrefix("data:").trim()
                             if (data == "[DONE]") break
                             val parsed = json.decodeFromString<ChatCompletionChunk>(data)
-                            val delta = parsed.choices.firstOrNull()?.delta?.content
+                            val choice = parsed.choices.firstOrNull()
+                            choice?.finishReason?.let { lastFinishReason = it }
+                            val delta = choice?.delta?.content
                             if (!delta.isNullOrEmpty()) {
-                                trySend(delta)
+                                send(delta)
                             }
                         }
                     }
-                    close()
-                } catch (e: IOException) {
-                    // Mid-stream read failures (timeouts, dropped connections)
-                    // are network problems, not malformed data.
-                    close(LlmException.Network(e))
-                } catch (e: Exception) {
-                    close(LlmException.ParseError(e))
-                } finally {
-                    response.close()
+                    // finish_reason == "length" means the model hit its
+                    // output cap: end the stream with an error instead of
+                    // pretending it completed. Deltas already delivered stay
+                    // with the collector as a partial result.
+                    if (lastFinishReason == "length") {
+                        close(LlmException.Truncated())
+                    }
                 }
+                close()
+            } catch (e: CancellationException) {
+                // Collector went away; awaitClose already cancelled the call.
+            } catch (e: LlmException) {
+                close(e)
+            } catch (e: IOException) {
+                // Mid-stream read failures (timeouts, dropped connections)
+                // are network problems, not malformed data.
+                close(LlmException.Network(e))
+            } catch (e: Exception) {
+                close(LlmException.ParseError(e))
+            }
+        }
+        awaitClose { call.cancel() }
+    }
+
+    private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resume(response)
             }
 
             override fun onFailure(call: Call, e: IOException) {
-                close(LlmException.Network(e))
+                if (continuation.isActive) {
+                    continuation.resumeWithException(e)
+                }
             }
         })
-
-        awaitClose { call.cancel() }
     }
 
     private fun buildRequestBody(request: ChatRequest, stream: Boolean) =
@@ -163,21 +199,6 @@ class OpenAiCompatibleProvider(
             429 -> throw LlmException.RateLimited()
             in 400..599 -> throw LlmException.Network()
         }
-    }
-
-    private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
-        continuation.invokeOnCancellation { cancel() }
-        enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
-            }
-
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) {
-                    continuation.resumeWith(Result.failure(e))
-                }
-            }
-        })
     }
 
     private companion object {
@@ -211,7 +232,10 @@ private data class ChatCompletionChunk(
     val choices: List<Choice> = emptyList()
 ) {
     @Serializable
-    data class Choice(val delta: Delta? = null)
+    data class Choice(
+        val delta: Delta? = null,
+        @SerialName("finish_reason") val finishReason: String? = null
+    )
 
     @Serializable
     data class Delta(val content: String? = null)
