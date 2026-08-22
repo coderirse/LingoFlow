@@ -34,8 +34,8 @@ android {
         applicationId = "com.lingoflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.3.0"
+        versionCode = 14
+        versionName = "1.3.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
