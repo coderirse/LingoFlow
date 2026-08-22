@@ -4,10 +4,15 @@ A modern Android translation app powered by ML Kit, Merriam-Webster Dictionary, 
 
 ## Features
 
-- **Instant Translation** — ML Kit on-device translation (English ↔ Chinese ↔ Japanese ↔ Korean)
-- **Dictionary Lookup** — Authoritative definitions from Merriam-Webster with phonetics, examples, and etymology
-- **AI-Powered Learning** — Context-aware explanations and multiple translation styles (Natural / Concise / Formal / Learning) via LLM
+- **Instant Translation** — ML Kit on-device translation (English ↔ Chinese ↔ Japanese ↔ Korean); long texts stream through the LLM with automatic layout formatting (paragraphs & lists) and can be cancelled at any time
+- **Dictionary Lookup** — Authoritative definitions from Merriam-Webster with phonetics, examples, and etymology; tap any word in a translation to look it up
+- **AI-Powered Learning** — Context-aware explanations and multiple translation styles (Natural / Concise / Formal / Learning) via LLM, with live streaming output
+- **Listen & Pause** — Text-to-speech for translations with play/pause state; long passages are read sentence by sentence
 - **Privacy-First** — API keys stay on your device (EncryptedSharedPreferences)
+
+## Download
+
+Grab the latest APK from [Releases](https://github.com/coderirse/LingoFlow/releases).
 
 ## Tech Stack
 
