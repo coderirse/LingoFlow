@@ -65,6 +65,7 @@ fun DictionaryBottomSheet(
     val lookupInfo by viewModel.lookupInfo.collectAsStateWithLifecycle()
     val lookupInfoUnavailable by viewModel.lookupInfoUnavailable.collectAsStateWithLifecycle()
     val lookupInfoLoading by viewModel.lookupInfoLoading.collectAsStateWithLifecycle()
+    val ttsReady by viewModel.ttsReady.collectAsStateWithLifecycle()
     val strings = LocalStrings.current
     var query by remember { mutableStateOf(initialWord) }
 
@@ -143,7 +144,7 @@ fun DictionaryBottomSheet(
                             DictionaryEntryContent(
                                 entry = entry,
                                 isFavorite = entry.word.trim().lowercase() in favorites,
-                                ttsReady = viewModel.ttsReady,
+                                ttsReady = ttsReady,
                                 onToggleFavorite = { viewModel.toggleFavorite(entry.word) },
                                 onSpeak = { viewModel.speak(entry.word) }
                             )
@@ -174,6 +175,9 @@ fun DictionaryBottomSheet(
                 is DictionaryUiState.Error -> {
                     DictionaryErrorContent(
                         error = state.error,
+                        word = query,
+                        ttsReady = ttsReady,
+                        onSpeak = { viewModel.speak(query) },
                         onGoToSettings = onGoToSettings
                     )
                 }
@@ -223,19 +227,21 @@ private fun DictionaryEntryContent(
             }
         }
 
-        entry.phonetics.firstOrNull()?.let { phonetic ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        // Pronunciation never depends on phonetic data: entries without a
+        // phonetic transcription must still offer the TTS play button.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            entry.phonetics.firstOrNull()?.let { phonetic ->
                 Text(
                     text = phonetic.text,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                IconButton(onClick = onSpeak, enabled = ttsReady) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = strings.playPronunciation
-                    )
-                }
+            }
+            IconButton(onClick = onSpeak, enabled = ttsReady) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = strings.playPronunciation
+                )
             }
         }
 
@@ -336,6 +342,9 @@ private fun DictionaryEntryContent(
 @Composable
 private fun DictionaryErrorContent(
     error: DictionaryException,
+    word: String,
+    ttsReady: Boolean,
+    onSpeak: () -> Unit,
     onGoToSettings: () -> Unit
 ) {
     val strings = LocalStrings.current
@@ -343,6 +352,12 @@ private fun DictionaryErrorContent(
         modifier = Modifier.padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // Pronunciation does not depend on the lookup succeeding.
+        WordPronunciationHeader(
+            word = word,
+            ttsReady = ttsReady,
+            onSpeak = onSpeak
+        )
         when (error) {
             is DictionaryException.NoApiKey -> {
                 Text(

@@ -52,7 +52,7 @@ class DictionaryViewModel @Inject constructor(
             initialValue = emptySet()
         )
 
-    val ttsReady: Boolean get() = ttsEngine.isReady
+    val ttsReady: StateFlow<Boolean> = ttsEngine.isReady
 
     /** Guards async results: a stale job from a previous word never writes state. */
     private var lookupEpoch = 0

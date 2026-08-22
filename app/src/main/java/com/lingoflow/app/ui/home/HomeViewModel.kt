@@ -2,6 +2,9 @@ package com.lingoflow.app.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lingoflow.app.data.engine.LongTextFormatter
+import com.lingoflow.app.data.engine.TranslationRouter
+import com.lingoflow.app.data.tts.TtsPlaybackState
 import com.lingoflow.app.data.tts.TtsEngine
 import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationException
@@ -9,6 +12,7 @@ import com.lingoflow.app.domain.model.TranslationStatus
 import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.model.translation.TranslationMode
+import com.lingoflow.app.domain.model.translation.TranslationNotices
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.ttsTag
@@ -45,6 +49,8 @@ data class HomeUiState(
     val isCurrentFavorite: Boolean = false,
     /** Whether text-to-speech is ready on this device. */
     val ttsReady: Boolean = false,
+    /** Current text-to-speech playback state. */
+    val ttsPlaybackState: TtsPlaybackState = TtsPlaybackState.IDLE,
     /** True while an LLM streaming translation is in progress. */
     val isStreaming: Boolean = false,
     /** Text received so far during a streaming translation. */
@@ -76,7 +82,17 @@ class HomeViewModel @Inject constructor(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
-        _uiState.update { it.copy(ttsReady = ttsEngine.isReady) }
+        _uiState.update { it.copy(ttsReady = ttsEngine.isReady.value) }
+        viewModelScope.launch {
+            ttsEngine.isReady.collect { ready ->
+                _uiState.update { it.copy(ttsReady = ready) }
+            }
+        }
+        viewModelScope.launch {
+            ttsEngine.playbackState.collect { playbackState ->
+                _uiState.update { it.copy(ttsPlaybackState = playbackState) }
+            }
+        }
         viewModelScope.launch {
             val settings = settingsRepository.getSettings()
             _uiState.update { it.copy(translationMode = settings.defaultTranslationMode) }
@@ -127,6 +143,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onModeChange(mode: TranslationMode) {
+        ttsEngine.stop()
         _uiState.update { it.copy(translationMode = mode) }
     }
 
@@ -136,6 +153,7 @@ class HomeViewModel @Inject constructor(
      * old target becomes the new source.
      */
     fun onSwapLanguages() {
+        ttsEngine.stop()
         _uiState.update { state ->
             if (state.sourceLanguage == Language.AUTO) {
                 state.copy(sourceLanguage = state.targetLanguage)
@@ -149,15 +167,27 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onTranslateClick() {
+        ttsEngine.stop()
         val snapshot = _uiState.value
         if (snapshot.inputText.isBlank() || snapshot.isTranslating) return
 
-        if (snapshot.translationMode in STREAMING_MODES) {
+        if (shouldStream(snapshot.translationMode, snapshot.inputText)) {
             startStreamingTranslation(snapshot)
         } else {
             startOneShotTranslation(snapshot)
         }
     }
+
+    /**
+     * NATURAL/CONCISE/FORMAL always stream. Long STANDARD text also streams:
+     * the router feeds it through the LLM so the layout gets organized and
+     * the result appears progressively. Short STANDARD (and LEARNING, whose
+     * JSON analysis only exists as a whole) stay one-shot.
+     */
+    private fun shouldStream(mode: TranslationMode, text: String): Boolean =
+        mode in STREAMING_MODES ||
+            (mode == TranslationMode.STANDARD &&
+                text.trim().length >= TranslationRouter.LONG_TEXT_MIN_LENGTH)
 
     /** Cancels an in-flight streaming translation, keeping the partial text. */
     fun onCancelStreaming() {
@@ -192,6 +222,7 @@ class HomeViewModel @Inject constructor(
                 ).onSuccess { response ->
                     onTranslationFinished(snapshot, translatedTextOf(response), response)
                 }.onFailure { error ->
+                    ttsEngine.stop()
                     _uiState.update {
                         it.copy(
                             isTranslating = false,
@@ -238,25 +269,60 @@ class HomeViewModel @Inject constructor(
                     accumulated.append(delta)
                     _uiState.update { it.copy(streamingText = accumulated.toString()) }
                 }
+                // Long STANDARD runs through the formatter at the end: the
+                // model already emits structure while streaming, and this
+                // pass normalizes the last mile (literal "\n" escapes, list
+                // markers that still share a line).
+                val finalText = if (snapshot.translationMode == TranslationMode.STANDARD) {
+                    LongTextFormatter.format(accumulated.toString())
+                } else {
+                    accumulated.toString()
+                }
                 onTranslationFinished(
                     snapshot,
-                    accumulated.toString(),
-                    TranslationResponse.Standard(accumulated.toString())
+                    finalText,
+                    TranslationResponse.Standard(finalText)
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // User cancelled: keep the partial text on screen, don't save.
-                _uiState.update {
-                    it.copy(isTranslating = false, isStreaming = false)
+                ttsEngine.stop()
+                // User cancelled: keep what already streamed on screen as a
+                // plain result (no history entry, no word lookup).
+                _uiState.update { state ->
+                    val partial = state.streamingText
+                    if (partial.isBlank()) {
+                        state.copy(isTranslating = false, isStreaming = false)
+                    } else {
+                        state.copy(
+                            isTranslating = false,
+                            isStreaming = false,
+                            translationResponse = TranslationResponse.Standard(partial)
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isTranslating = false,
-                        isStreaming = false,
-                        streamingText = "",
-                        errorMessage = (e as? TranslationException)?.userMessage
-                            ?: "Translation failed. Please try again."
-                    )
+                ttsEngine.stop()
+                val partial = _uiState.value.streamingText
+                if (partial.isBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            isTranslating = false,
+                            isStreaming = false,
+                            streamingText = "",
+                            errorMessage = (e as? TranslationException)?.userMessage
+                                ?: "Translation failed. Please try again."
+                        )
+                    }
+                } else {
+                    // Broke mid-stream: keep the partial text on screen and
+                    // flag it with a transient notice instead of wiping it.
+                    _uiState.update {
+                        it.copy(
+                            isTranslating = false,
+                            isStreaming = false,
+                            translationResponse = TranslationResponse.Standard(partial),
+                            snackbarMessage = TranslationNotices.STREAM_INTERRUPTED
+                        )
+                    }
                 }
             }
         }
@@ -267,6 +333,9 @@ class HomeViewModel @Inject constructor(
         translatedText: String,
         response: TranslationResponse
     ) {
+        // A finished translation replaces the screen content; any speech of
+        // the previous result must not keep talking over it.
+        ttsEngine.stop()
         val historyItem = TranslationHistoryItem(
             sourceText = snapshot.inputText,
             translatedText = translatedText,
@@ -284,7 +353,7 @@ class HomeViewModel @Inject constructor(
                 errorMessage = null,
                 currentHistoryId = historyItem.id,
                 isCurrentFavorite = false,
-                ttsReady = ttsEngine.isReady,
+                ttsReady = ttsEngine.isReady.value,
                 wordLookup = null,
                 wordLookupLoading = false
             )
@@ -320,6 +389,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onClearInput() {
+        ttsEngine.stop()
         _uiState.update {
             it.copy(
                 inputText = "",
@@ -336,7 +406,12 @@ class HomeViewModel @Inject constructor(
         val state = _uiState.value
         val text = state.translatedText
         if (text.isBlank()) return
-        ttsEngine.speak(text, state.targetLanguage.ttsTag ?: "en-US")
+        when (state.ttsPlaybackState) {
+            TtsPlaybackState.IDLE ->
+                ttsEngine.speak(text, state.targetLanguage.ttsTag ?: "en-US")
+
+            TtsPlaybackState.SPEAKING -> ttsEngine.stop()
+        }
     }
 
     /**
@@ -352,6 +427,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onClearResult() {
+        ttsEngine.stop()
         _uiState.update {
             it.copy(
                 translationResponse = null,

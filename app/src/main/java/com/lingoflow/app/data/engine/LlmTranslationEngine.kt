@@ -45,10 +45,6 @@ class LlmTranslationEngine(
     override suspend fun translate(
         request: TranslationRequest
     ): Result<TranslationResponse> {
-        if (request.mode == TranslationMode.STANDARD) {
-            return Result.failure(TranslationException("STANDARD mode is handled on-device."))
-        }
-
         val config = activeProviderConfig()
             ?: return Result.failure(TranslationException("LLM API key is not configured."))
 
@@ -58,6 +54,11 @@ class LlmTranslationEngine(
         return try {
             _status.value = TranslationStatus.TRANSLATING
             val response = provider.chat(chatRequest)
+            if (response.finishReason == "length") {
+                // A truncated "success" must never be presented as a
+                // complete translation (it would also land in history).
+                return Result.failure(TranslationException(TRUNCATED_MESSAGE))
+            }
             Result.success(buildResponse(request.mode, response.content))
         } catch (e: CancellationException) {
             throw e
@@ -70,7 +71,7 @@ class LlmTranslationEngine(
 
     override fun translateStream(request: TranslationRequest): Flow<String> = flow {
         require(request.mode in STREAMABLE_MODES) {
-            "Only NATURAL/CONCISE/FORMAL modes support streaming"
+            "Only NATURAL/CONCISE/FORMAL and long STANDARD modes support streaming"
         }
         val config = activeProviderConfig()
             ?: throw TranslationException("LLM API key is not configured.")
@@ -109,13 +110,31 @@ class LlmTranslationEngine(
             Message(role = "system", content = systemPrompt(request)),
             Message(role = "user", content = request.text)
         ),
-        temperature = config.temperature
+        temperature = config.temperature,
+        // Long STANDARD translations are the only outputs big enough to
+        // hit a provider's (often low) default output cap; raise it there
+        // and leave the other modes on the provider default.
+        maxTokens = if (request.mode == TranslationMode.STANDARD) {
+            LONG_STANDARD_MAX_TOKENS
+        } else {
+            null
+        }
     )
 
     private fun systemPrompt(request: TranslationRequest): String {
         val source = request.sourceLanguage.displayName
         val target = request.targetLanguage.displayName
         return when (request.mode) {
+            TranslationMode.STANDARD ->
+                "You are a professional translator. Translate the user's text from $source " +
+                    "to $target faithfully, and organize the layout of the translation " +
+                    "for readability: split it into paragraphs at natural boundaries " +
+                    "instead of one solid block; render enumerations, steps and lists " +
+                    "(even ones written inline in the source) as numbered or bulleted " +
+                    "lists with exactly one item per line; keep short headings or " +
+                    "labels on their own line. Use real newline characters (one blank " +
+                    "line between paragraphs), never literal \"\\n\". Do not add, omit " +
+                    "or summarize content. Output ONLY the translation, no explanations."
             TranslationMode.NATURAL ->
                 "You are a professional translator. Translate the user's text from $source " +
                     "to $target naturally and idiomatically, as a native speaker would say it. " +
@@ -136,7 +155,6 @@ class LlmTranslationEngine(
                     "word or phrase usage in Chinese), \"grammar_note\" (string or null, in " +
                     "Chinese), \"usage_note\" (string or null, in Chinese), \"synonyms\" " +
                     "(array of English strings)."
-            TranslationMode.STANDARD -> ""
         }
     }
 
@@ -144,6 +162,11 @@ class LlmTranslationEngine(
         mode: TranslationMode,
         content: String
     ): TranslationResponse {
+        if (mode == TranslationMode.STANDARD) {
+            return TranslationResponse.Standard(
+                translatedText = LongTextFormatter.format(content)
+            )
+        }
         if (mode != TranslationMode.LEARNING) {
             return TranslationResponse.Standard(translatedText = content.trim())
         }
@@ -194,14 +217,22 @@ class LlmTranslationEngine(
             TranslationException("LLM rate limit reached. Please try again later.")
         is LlmException.Network ->
             TranslationException("Network error. Please check your connection.")
+        is LlmException.Truncated -> TranslationException(TRUNCATED_MESSAGE)
         else -> TranslationException("Translation failed. Please try again.", this)
     }
 
     private companion object {
+        const val TRUNCATED_MESSAGE =
+            "The translation was cut off by the model's output limit. " +
+                "Try a shorter text."
+
+        const val LONG_STANDARD_MAX_TOKENS = 8192
+
         val STREAMABLE_MODES = setOf(
             TranslationMode.NATURAL,
             TranslationMode.CONCISE,
-            TranslationMode.FORMAL
+            TranslationMode.FORMAL,
+            TranslationMode.STANDARD
         )
     }
 }

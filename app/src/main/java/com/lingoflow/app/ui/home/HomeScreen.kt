@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -94,9 +95,11 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.R
+import com.lingoflow.app.data.tts.TtsPlaybackState
 import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationStatus
 import com.lingoflow.app.domain.model.translation.TranslationMode
+import com.lingoflow.app.domain.model.translation.TranslationNotices
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.translation.displayName
 import com.lingoflow.app.ui.components.BlinkingCursor
@@ -104,6 +107,7 @@ import com.lingoflow.app.ui.dictionary.DictionaryBottomSheet
 import com.lingoflow.app.ui.dictionary.WordLookupInfoContent
 import com.lingoflow.app.ui.dictionary.WordPreviewSheet
 import com.lingoflow.app.ui.history.HistoryRoute
+import com.lingoflow.app.ui.i18n.AppStrings
 import com.lingoflow.app.ui.i18n.LocalStrings
 import com.lingoflow.app.ui.learning.LearningRoute
 import com.lingoflow.app.ui.theme.LingoFlowTheme
@@ -164,8 +168,8 @@ fun HomeScreen(
     val context = LocalContext.current
 
     LaunchedEffect(uiState.snackbarMessage) {
-        uiState.snackbarMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.snackbarMessage?.let { raw ->
+            snackbarHostState.showSnackbar(localizeNotice(raw, strings))
             onSnackbarShown()
         }
     }
@@ -663,10 +667,12 @@ private fun TranslateButton(
 ) {
     val strings = LocalStrings.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    // Streaming modes cancel the stream; LLM one-shot modes (LEARNING) cancel
-    // the request. On-device STANDARD runs to completion.
-    val cancellable = uiState.isStreaming ||
-        (uiState.isTranslating && uiState.translationMode != TranslationMode.STANDARD)
+    // Every in-flight translation is cancellable, STANDARD included: short
+    // texts finish on-device almost instantly, but long texts go through
+    // the LLM and need the same way out as the other modes. Streaming
+    // modes cancel the stream; one-shot modes (STANDARD/LEARNING) cancel
+    // the request.
+    val cancellable = uiState.isStreaming || uiState.isTranslating
     val enabled = cancellable ||
         (uiState.inputText.isNotBlank() && !uiState.isTranslating)
     val gradient = Brush.horizontalGradient(
@@ -749,6 +755,7 @@ private fun TranslationResultCard(
     val strings = LocalStrings.current
     val response = uiState.translationResponse
     val hasResult = uiState.translatedText.isNotEmpty()
+    val isSpeaking = uiState.ttsPlaybackState == TtsPlaybackState.SPEAKING
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -781,15 +788,27 @@ private fun TranslationResultCard(
                     onClick = onSpeakClick,
                     enabled = uiState.ttsReady && hasResult
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = strings.speakTranslation,
-                        tint = if (uiState.ttsReady && hasResult) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
+                    if (isSpeaking) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_pause),
+                            contentDescription = strings.pauseTranslation,
+                            tint = if (uiState.ttsReady && hasResult) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = strings.speakTranslation,
+                            tint = if (uiState.ttsReady && hasResult) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
                 }
             }
 
@@ -1011,27 +1030,51 @@ private fun ClickableWords(
 ) {
     // Last tapped word stays highlighted (underline + brand color) as feedback.
     var tappedWord by remember(text) { mutableStateOf<String?>(null) }
+    val density = LocalDensity.current
+    // One line of body text: the height a blank source line should occupy
+    // so paragraph gaps read the same as in the non-clickable rendering.
+    val paragraphGap = with(density) { 27.sp.toDp() }
 
-    FlowRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start)
-    ) {
-        text.split(Regex("\\s+")).forEach { rawWord ->
-            val cleanWord = rawWord.trim { !it.isLetterOrDigit() }.lowercase()
-            val isTapped = cleanWord.isNotEmpty() && cleanWord == tappedWord
-            Text(
-                text = rawWord,
-                modifier = Modifier.clickable(enabled = cleanWord.isNotEmpty()) {
-                    tappedWord = cleanWord
-                    onWordClick(cleanWord)
-                },
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 18.sp,
-                    lineHeight = 27.sp,
-                    textDecoration = if (isTapped) TextDecoration.Underline else null
-                ),
-                color = if (isTapped) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-            )
+    // Line-aware layout via [WordLineSplitter]: the word split itself is
+    // whitespace-based, so paragraph breaks must be handled BEFORE
+    // splitting — each line becomes its own word-flow row and blank lines
+    // become real vertical gaps. Without this, the organized layout of a
+    // long translation collapses back into one solid block the moment
+    // streaming finishes.
+    Column(modifier = modifier.fillMaxWidth()) {
+        WordLineSplitter.lines(text).forEach { line ->
+            if (line.isEmpty()) {
+                Spacer(modifier = Modifier.height(paragraphGap))
+            } else {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start)
+                ) {
+                    line.split(Regex("\\s+")).filter { it.isNotEmpty() }
+                        .forEach { rawWord ->
+                            val cleanWord =
+                                rawWord.trim { !it.isLetterOrDigit() }.lowercase()
+                            val isTapped = cleanWord.isNotEmpty() && cleanWord == tappedWord
+                            Text(
+                                text = rawWord,
+                                modifier = Modifier.clickable(enabled = cleanWord.isNotEmpty()) {
+                                    tappedWord = cleanWord
+                                    onWordClick(cleanWord)
+                                },
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = 18.sp,
+                                    lineHeight = 27.sp,
+                                    textDecoration = if (isTapped) TextDecoration.Underline else null
+                                ),
+                                color = if (isTapped) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                        }
+                }
+            }
         }
     }
 }
@@ -1190,3 +1233,15 @@ private fun HomeScreenPreview() {
         )
     }
 }
+
+/**
+ * The data layer emits stable notice keys; only the UI knows the active
+ * language. Unknown values (raw messages) pass through unchanged.
+ */
+private fun localizeNotice(message: String, strings: AppStrings): String =
+    when (message) {
+        TranslationNotices.LLM_KEY_MISSING -> strings.noticeLlmKeyMissing
+        TranslationNotices.LLM_FAILED -> strings.noticeLlmFailed
+        TranslationNotices.STREAM_INTERRUPTED -> strings.noticeStreamInterrupted
+        else -> message
+    }
