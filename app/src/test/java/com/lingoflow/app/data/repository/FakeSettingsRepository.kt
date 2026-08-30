@@ -3,6 +3,7 @@ package com.lingoflow.app.data.repository
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.ProviderConfig
+import com.lingoflow.app.domain.model.translation.TranslationMemory
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
@@ -29,6 +30,15 @@ class FakeSettingsRepository(
         private set
 
     private val current = MutableStateFlow(initial)
+
+    /** Seeded by tests to simulate a previous session. */
+    var memory: TranslationMemory? = null
+
+    override suspend fun translationMemory(): TranslationMemory? = memory
+
+    override suspend fun saveTranslationMemory(memory: TranslationMemory) {
+        this.memory = memory
+    }
 
     override suspend fun getSettings(): AppSettings = current.value
 

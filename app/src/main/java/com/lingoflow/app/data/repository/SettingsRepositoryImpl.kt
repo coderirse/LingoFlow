@@ -6,12 +6,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppLanguage
 import com.lingoflow.app.domain.model.settings.AppSettings
 import com.lingoflow.app.domain.model.settings.InterfaceStyle
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.settings.ThemeMode
+import com.lingoflow.app.domain.model.translation.TranslationMemory
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.repository.SettingsRepository
 import javax.inject.Inject
@@ -151,7 +153,34 @@ class SettingsRepositoryImpl @Inject constructor(
     private fun configApiKey(settings: AppSettings, id: LlmProviderId): String =
         settings.llmProviders[id]?.apiKey.orEmpty()
 
+    override suspend fun translationMemory(): TranslationMemory? {
+        val prefs = dataStore.data.first()
+        val source = prefs[KEY_MEM_SOURCE]?.let { enumOrNull<Language>(it) }
+        val target = prefs[KEY_MEM_TARGET]?.let { enumOrNull<Language>(it) }
+        val mode = prefs[KEY_MEM_MODE]?.let { enumOrNull<TranslationMode>(it) }
+        // A partial record (e.g. from a future schema change) is no memory.
+        if (source == null || target == null || mode == null) return null
+        // AUTO is only ever valid as a source; never restore it as target.
+        if (target == Language.AUTO) return null
+        return TranslationMemory(source, target, mode)
+    }
+
+    override suspend fun saveTranslationMemory(memory: TranslationMemory) {
+        dataStore.edit { prefs ->
+            prefs[KEY_MEM_SOURCE] = memory.source.name
+            prefs[KEY_MEM_TARGET] = memory.target.name
+            prefs[KEY_MEM_MODE] = memory.mode.name
+        }
+    }
+
+    private inline fun <reified T : Enum<T>> enumOrNull(name: String): T? =
+        runCatching { enumValueOf<T>(name) }.getOrNull()
+
     private companion object {
+        val KEY_MEM_SOURCE = stringPreferencesKey("mem_source_lang")
+        val KEY_MEM_TARGET = stringPreferencesKey("mem_target_lang")
+        val KEY_MEM_MODE = stringPreferencesKey("mem_mode")
+
         val KEY_ACTIVE_PROVIDER = stringPreferencesKey("active_llm_provider")
         val KEY_DEFAULT_MODE = stringPreferencesKey("default_translation_mode")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")

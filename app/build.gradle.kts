@@ -34,8 +34,8 @@ android {
         applicationId = "com.lingoflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.4.0"
+        versionCode = 16
+        versionName = "1.4.1"
 
         // Phone-targeted release APKs: drops the ~34MB of emulator-only
         // (x86/x86_64) ML Kit native libraries from the universal APK.

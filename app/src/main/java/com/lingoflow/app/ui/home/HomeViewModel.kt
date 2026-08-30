@@ -14,6 +14,7 @@ import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationNotices
 import com.lingoflow.app.domain.model.translation.TranslationErrors
+import com.lingoflow.app.domain.model.translation.TranslationMemory
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.ttsTag
@@ -60,7 +61,9 @@ data class HomeUiState(
     /** Chinese dictionary info for single-word English→Chinese translations. */
     val wordLookup: WordLookupInfo? = null,
     /** True while the LLM dictionary block is being fetched. */
-    val wordLookupLoading: Boolean = false
+    val wordLookupLoading: Boolean = false,
+    /** The mode that produced the current [translationResponse]; drives the badge. */
+    val resultMode: TranslationMode? = null
 ) {
     /** Convenience accessor for copy/share regardless of response type. */
     val translatedText: String
@@ -95,9 +98,23 @@ class HomeViewModel @Inject constructor(
                 _uiState.update { it.copy(ttsPlaybackState = playbackState) }
             }
         }
+        // Resume the last-used setup: e.g. zh->en + Natural last time means
+        // the same next launch. Without memory (fresh install) fall back to
+        // the settings' default mode and the plain AUTO/Chinese pair.
         viewModelScope.launch {
+            val memory = settingsRepository.translationMemory()
             val settings = settingsRepository.getSettings()
-            _uiState.update { it.copy(translationMode = settings.defaultTranslationMode) }
+            _uiState.update {
+                if (memory != null) {
+                    it.copy(
+                        sourceLanguage = memory.source,
+                        targetLanguage = memory.target,
+                        translationMode = memory.mode
+                    )
+                } else {
+                    it.copy(translationMode = settings.defaultTranslationMode)
+                }
+            }
         }
         viewModelScope.launch {
             translateText.status.collect { status ->
@@ -136,17 +153,36 @@ class HomeViewModel @Inject constructor(
 
     fun onSourceLanguageChange(language: Language) {
         _uiState.update { it.copy(sourceLanguage = language) }
+        rememberCurrentSetup()
     }
 
     fun onTargetLanguageChange(language: Language) {
         // Auto is never a valid target; the target picker already hides it.
         if (language == Language.AUTO) return
         _uiState.update { it.copy(targetLanguage = language) }
+        rememberCurrentSetup()
     }
 
     fun onModeChange(mode: TranslationMode) {
         ttsEngine.stop()
         _uiState.update { it.copy(translationMode = mode) }
+        rememberCurrentSetup()
+    }
+
+    /**
+     * Persists the current language pair + mode so the next launch resumes
+     * here. Scoped to its own three DataStore keys - never touches the
+     * settings document (API keys etc.). Fire-and-forget; a failed save is
+     * invisible and self-corrects on the next change.
+     */
+    private fun rememberCurrentSetup() {
+        val snapshot = _uiState.value
+        val memory = TranslationMemory(
+            source = snapshot.sourceLanguage,
+            target = snapshot.targetLanguage,
+            mode = snapshot.translationMode
+        )
+        viewModelScope.launch { runCatching { settingsRepository.saveTranslationMemory(memory) } }
     }
 
     /**
@@ -166,6 +202,7 @@ class HomeViewModel @Inject constructor(
                 )
             }
         }
+        rememberCurrentSetup()
     }
 
     fun onTranslateClick() {
@@ -248,6 +285,7 @@ class HomeViewModel @Inject constructor(
 
     private fun startStreamingTranslation(snapshot: HomeUiState) {
         streamJob?.cancel()
+        val resultMode = snapshot.translationMode
         val request = TranslationRequest(
             text = snapshot.inputText,
             sourceLanguage = snapshot.sourceLanguage,
@@ -301,7 +339,8 @@ class HomeViewModel @Inject constructor(
                         state.copy(
                             isTranslating = false,
                             isStreaming = false,
-                            translationResponse = TranslationResponse.Standard(partial)
+                            translationResponse = TranslationResponse.Standard(partial),
+                            resultMode = resultMode
                         )
                     }
                 }
@@ -326,6 +365,7 @@ class HomeViewModel @Inject constructor(
                             isTranslating = false,
                             isStreaming = false,
                             translationResponse = TranslationResponse.Standard(partial),
+                            resultMode = resultMode,
                             snackbarMessage = TranslationNotices.STREAM_INTERRUPTED
                         )
                     }
@@ -356,6 +396,7 @@ class HomeViewModel @Inject constructor(
                 isStreaming = false,
                 streamingText = "",
                 translationResponse = response,
+                resultMode = snapshot.translationMode,
                 errorMessage = null,
                 currentHistoryId = historyItem.id,
                 isCurrentFavorite = false,
@@ -404,6 +445,7 @@ class HomeViewModel @Inject constructor(
             it.copy(
                 inputText = "",
                 translationResponse = null,
+                resultMode = null,
                 errorMessage = null,
                 currentHistoryId = null,
                 isCurrentFavorite = false,
@@ -448,6 +490,7 @@ class HomeViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 translationResponse = null,
+                resultMode = null,
                 errorMessage = null,
                 currentHistoryId = null,
                 isCurrentFavorite = false,
@@ -470,11 +513,13 @@ class HomeViewModel @Inject constructor(
                 targetLanguage = item.targetLanguage,
                 translationMode = item.mode,
                 translationResponse = null,
+                resultMode = null,
                 errorMessage = null,
                 currentHistoryId = null,
                 isCurrentFavorite = false
             )
         }
+        rememberCurrentSetup()
     }
 
     /** Called by the UI after the transient snackbar has been shown. */

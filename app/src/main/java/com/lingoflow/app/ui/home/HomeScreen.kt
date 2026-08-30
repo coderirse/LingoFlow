@@ -791,11 +791,32 @@ private fun TranslationResultCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = strings.translationTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = strings.translationTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    // Small tag naming the mode that produced this result —
+                    // mirrors the badge the History tab shows per record.
+                    uiState.resultMode?.let { mode ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Text(
+                                text = mode.displayName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 IconButton(
                     onClick = onSpeakClick,
                     enabled = uiState.ttsReady && hasResult

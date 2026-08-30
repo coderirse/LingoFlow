@@ -792,4 +792,72 @@ class HomeViewModelTest {
         // ML Kit direct translation is unaffected.
         assertTrue(state.translationResponse is TranslationResponse.Standard)
     }
+
+    @Test
+    fun `translation memory restores languages and mode on init`() = runTest {
+        val settings = FakeSettingsRepository().apply {
+            memory = com.lingoflow.app.domain.model.translation.TranslationMemory(
+                source = Language.CHINESE,
+                target = Language.ENGLISH,
+                mode = TranslationMode.FORMAL
+            )
+        }
+        val viewModel = createViewModel(settings = settings).viewModel
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(Language.CHINESE, state.sourceLanguage)
+        assertEquals(Language.ENGLISH, state.targetLanguage)
+        assertEquals(TranslationMode.FORMAL, state.translationMode)
+    }
+
+    @Test
+    fun `without memory the settings default mode applies`() = runTest {
+        val settings = FakeSettingsRepository(
+            initial = FakeSettingsRepository().let {
+                com.lingoflow.app.domain.model.settings.AppSettings(
+                    activeLlmProviderId = com.lingoflow.app.domain.model.llm.LlmProviderId.DEEPSEEK,
+                    llmProviders = emptyMap(),
+                    dictionaryApiKey = "",
+                    defaultTranslationMode = TranslationMode.NATURAL
+                )
+            }
+        )
+        val viewModel = createViewModel(settings = settings).viewModel
+        advanceUntilIdle()
+
+        assertEquals(TranslationMode.NATURAL, viewModel.uiState.value.translationMode)
+        assertEquals(Language.AUTO, viewModel.uiState.value.sourceLanguage)
+    }
+
+    @Test
+    fun `mode and language changes persist translation memory`() = runTest {
+        val settings = FakeSettingsRepository()
+        val viewModel = createViewModel(settings = settings).viewModel
+        advanceUntilIdle()
+
+        viewModel.onModeChange(TranslationMode.CONCISE)
+        viewModel.onTargetLanguageChange(Language.JAPANESE)
+        advanceUntilIdle()
+
+        val memory = settings.memory!!
+        assertEquals(TranslationMode.CONCISE, memory.mode)
+        assertEquals(Language.JAPANESE, memory.target)
+        assertEquals(Language.AUTO, memory.source)
+    }
+
+    @Test
+    fun `finished translation carries the mode badge`() = runTest {
+        val viewModel = createViewModel().viewModel
+        advanceUntilIdle()
+        viewModel.onInputChange("Hello")
+        viewModel.onTranslateClick()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val response = state.translationResponse
+        assertTrue(response is TranslationResponse.Standard)
+        assertEquals("你好", (response as TranslationResponse.Standard).translatedText)
+        assertEquals(TranslationMode.STANDARD, state.resultMode)
+    }
 }
