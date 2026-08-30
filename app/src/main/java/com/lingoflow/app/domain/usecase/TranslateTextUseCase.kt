@@ -4,6 +4,7 @@ import com.lingoflow.app.domain.engine.StreamingTranslationEngine
 import com.lingoflow.app.domain.engine.TranslationEngine
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.TranslationStatus
+import com.lingoflow.app.domain.model.translation.TranslationErrors
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import javax.inject.Inject
@@ -24,7 +25,7 @@ class TranslateTextUseCase @Inject constructor(
         request: TranslationRequest
     ): Result<TranslationResponse> {
         if (request.text.isBlank()) {
-            return Result.failure(TranslationException("Nothing to translate."))
+            return Result.failure(TranslationException(TranslationErrors.NOTHING_TO_TRANSLATE))
         }
         return engine.translate(request)
     }

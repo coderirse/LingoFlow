@@ -51,7 +51,17 @@ class HistoryRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clearAllHistory() {
-        dataStore.edit { it.remove(KEY_HISTORY) }
+        dataStore.edit { prefs ->
+            // Favorite records survive "Clear All": they are the user's
+            // curated learning material (Learning tab), not transient
+            // history. The confirm dialog in the UI says the same.
+            val favorites = prefs.decode().filter { it.isFavorite }
+            if (favorites.isEmpty()) {
+                prefs.remove(KEY_HISTORY)
+            } else {
+                prefs[KEY_HISTORY] = json.encodeToString(favorites)
+            }
+        }
     }
 
     override fun getAllHistory(): Flow<List<TranslationHistoryItem>> =

@@ -21,7 +21,11 @@ data class SettingsUiState(
         dictionaryApiKey = ""
     ),
     val isLoading: Boolean = true,
-    val saveSuccess: Boolean = false,
+    /** True when non-appearance edits are pending and not yet saved. */
+    val isDirty: Boolean = false,
+    val isSaving: Boolean = false,
+    /** Stable error key (see [com.lingoflow.app.domain.model.translation.TranslationErrors]). */
     val error: String? = null,
+    val saveSuccess: Boolean = false,
     val updateCheck: UpdateCheckState = UpdateCheckState.Idle
 )

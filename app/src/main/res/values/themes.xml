@@ -2,4 +2,15 @@
 <resources>
 
     <style name="Theme.Lingoflow" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      Startup splash: holds a warm-paper background while the persisted
+      theme/language is read (see MainActivity), then hands over to the real
+      theme. Prevents the one-frame wrong-theme flash on launch.
+    -->
+    <style name="Theme.Lingoflow.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#FAF6EF</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.Lingoflow</item>
+    </style>
 </resources>

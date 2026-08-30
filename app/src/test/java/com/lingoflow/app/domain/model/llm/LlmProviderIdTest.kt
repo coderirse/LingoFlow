@@ -14,8 +14,16 @@ class LlmProviderIdTest {
 
     @Test
     fun `all providers are registered`() {
-        assertEquals(6, LlmProviderId.entries.size)
+        // ANTHROPIC was removed: its native API (/v1/messages) does not speak
+        // the OpenAI-compatible protocol this client uses; gateway users go
+        // through CUSTOM.
+        assertEquals(5, LlmProviderId.entries.size)
         assertTrue(LlmProviderId.entries.contains(LlmProviderId.DEEPSEEK))
+    }
+
+    @Test
+    fun `GEMINI default points at the OpenAI-compatible endpoint`() {
+        assertTrue(LlmProviderId.GEMINI.defaultBaseUrl.endsWith("/openai"))
     }
 
     @Test

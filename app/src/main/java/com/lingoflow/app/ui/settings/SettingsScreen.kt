@@ -1,17 +1,23 @@
 package com.lingoflow.app.ui.settings
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +51,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.core.net.toUri
 import com.lingoflow.app.domain.model.llm.LlmProviderId
 import com.lingoflow.app.domain.model.settings.AppLanguage
@@ -72,6 +80,7 @@ fun SettingsScreen(
     onDefaultModeChange: (TranslationMode) -> Unit,
     onSaveClick: () -> Unit,
     onSaveSuccessConsumed: () -> Unit,
+    onErrorConsumed: () -> Unit,
     onCheckUpdates: () -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onAppLanguageChange: (AppLanguage) -> Unit,
@@ -80,6 +89,7 @@ fun SettingsScreen(
 ) {
     val strings = LocalStrings.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDiscardDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.saveSuccess) {
         if (uiState.saveSuccess) {
@@ -88,8 +98,41 @@ fun SettingsScreen(
         }
     }
 
-    val activeProviderId = uiState.settings.activeLlmProviderId
-    val activeConfig = uiState.settings.llmProviders[activeProviderId]
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { code ->
+            snackbarHostState.showSnackbar(strings.localizedError(code))
+            onErrorConsumed()
+        }
+    }
+
+    // Unsaved non-appearance edits: intercept system back / gesture so the
+    // user chooses instead of silently losing work.
+    BackHandler(enabled = uiState.isDirty) {
+        showDiscardDialog = true
+    }
+
+    if (showDiscardDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(strings.unsavedChangesTitle) },
+            text = { Text(strings.unsavedChangesMessage) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        onBack()
+                    }
+                ) {
+                    Text(strings.discard, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(strings.keepEditing)
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -97,7 +140,9 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text(strings.settings) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        if (uiState.isDirty) showDiscardDialog = true else onBack()
+                    }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = strings.back
@@ -106,13 +151,32 @@ fun SettingsScreen(
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            // The save action stays reachable regardless of scroll position.
+            Surface(color = MaterialTheme.colorScheme.background) {
+                Button(
+                    onClick = onSaveClick,
+                    enabled = uiState.isDirty && !uiState.isSaving,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = strings.saveSettings,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .imePadding(),
+                .padding(innerPadding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 horizontal = 20.dp,
                 vertical = 8.dp
@@ -122,34 +186,34 @@ fun SettingsScreen(
             item {
                 SettingsSection(title = strings.llmProvider) {
                     ProviderDropdown(
-                        selected = activeProviderId,
+                        selected = uiState.settings.activeLlmProviderId,
                         onSelected = onProviderChange
                     )
                     SecretTextField(
-                        value = activeConfig?.apiKey ?: "",
+                        value = uiState.settings.llmProviders[uiState.settings.activeLlmProviderId]?.apiKey ?: "",
                         onValueChange = onApiKeyChange,
                         label = strings.apiKey
                     )
                     OutlinedTextField(
-                        value = activeConfig?.baseUrl ?: "",
+                        value = uiState.settings.llmProviders[uiState.settings.activeLlmProviderId]?.baseUrl ?: "",
                         onValueChange = onBaseUrlChange,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text(strings.baseUrl) },
-                        placeholder = { Text(activeProviderId.defaultBaseUrl) },
+                        placeholder = { Text(uiState.settings.activeLlmProviderId.defaultBaseUrl) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
                     )
                     OutlinedTextField(
-                        value = activeConfig?.model ?: "",
+                        value = uiState.settings.llmProviders[uiState.settings.activeLlmProviderId]?.model ?: "",
                         onValueChange = onModelChange,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text(strings.model) },
-                        placeholder = { Text(activeProviderId.defaultModel) },
+                        placeholder = { Text(uiState.settings.activeLlmProviderId.defaultModel) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
                     )
                     TemperatureRow(
-                        temperature = activeConfig?.temperature ?: 0.7f,
+                        temperature = uiState.settings.llmProviders[uiState.settings.activeLlmProviderId]?.temperature ?: 0.7f,
                         onTemperatureChange = onTemperatureChange
                     )
                 }
@@ -205,18 +269,9 @@ fun SettingsScreen(
             }
 
             item {
-                Button(
-                    onClick = onSaveClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
-                ) {
-                    Text(
-                        text = strings.saveSettings,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
+                // Breathing room below the last card; the Save button lives
+                // in the Scaffold bottomBar.
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
@@ -228,12 +283,9 @@ private fun SettingsSection(
     content: @Composable () -> Unit
 ) {
     Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline
-        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -372,8 +424,16 @@ private fun SecretTextField(
         },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         trailingIcon = {
-            TextButton(onClick = { passwordVisible = !passwordVisible }) {
-                Text(if (passwordVisible) strings.hide else strings.show)
+            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                Icon(
+                    imageVector = if (passwordVisible) {
+                        Icons.Default.VisibilityOff
+                    } else {
+                        Icons.Default.Visibility
+                    },
+                    contentDescription = if (passwordVisible) strings.hide else strings.show,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     )
@@ -401,11 +461,11 @@ private fun TemperatureRow(
                 onTemperatureChange((raw * 10).roundToInt() / 10f)
             },
             valueRange = 0f..2f,
-            steps = 20,
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = String.format(Locale.US, "%.2f", temperature),
+            // One decimal — matching the 0.1 step, not implying 0.01 precision.
+            text = String.format(Locale.US, "%.1f", temperature),
             style = MaterialTheme.typography.bodyMedium
         )
     }
@@ -594,7 +654,6 @@ private fun InterfaceStyleDropdown(
 private fun providerDisplayName(providerId: LlmProviderId): String = when (providerId) {
     LlmProviderId.DEEPSEEK -> "DeepSeek"
     LlmProviderId.OPENAI -> "OpenAI"
-    LlmProviderId.ANTHROPIC -> "Anthropic"
     LlmProviderId.GEMINI -> "Gemini"
     LlmProviderId.MOONSHOT -> "Moonshot"
     LlmProviderId.CUSTOM -> "Custom"
@@ -616,6 +675,7 @@ private fun SettingsScreenPreview() {
             onDefaultModeChange = {},
             onSaveClick = {},
             onSaveSuccessConsumed = {},
+            onErrorConsumed = {},
             onCheckUpdates = {},
             onThemeModeChange = {},
             onAppLanguageChange = {},

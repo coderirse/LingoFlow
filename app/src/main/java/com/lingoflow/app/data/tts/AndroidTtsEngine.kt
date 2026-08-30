@@ -5,14 +5,22 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** [TtsEngine] backed by the platform [TextToSpeech] API. */
+/**
+ * [TtsEngine] backed by the platform [TextToSpeech] API.
+ *
+ * The platform engine has no pause API, so pause is emulated at the chunk
+ * level: text is pre-split into sentence-sized chunks ([TtsTextChunker]),
+ * pause stops the engine while remembering which chunk was playing, and
+ * resume replays from that chunk. Precision is therefore sentence-level —
+ * a pause mid-sentence restarts that sentence.
+ */
 @Singleton
 class AndroidTtsEngine @Inject constructor(
     @ApplicationContext context: Context
@@ -27,10 +35,17 @@ class AndroidTtsEngine @Inject constructor(
     override val playbackState: StateFlow<TtsPlaybackState> =
         _playbackState.asStateFlow()
 
-    private val utteranceSequence = AtomicLong(0)
+    /** Monotonic session counter; invalidates progress callbacks from old sessions. */
+    private val sessionCounter = AtomicInteger(0)
 
+    /** Chunks of the active (speaking or paused) session. */
+    private var sessionChunks: List<String> = emptyList()
+    private var sessionLanguage: String = "en-US"
+    private var sessionCounterValue: Int = -1
+
+    /** Index of the chunk currently playing, or the pause point when paused. */
     @Volatile
-    private var activeUtteranceId: String? = null
+    private var activeChunkIndex: Int = -1
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -44,31 +59,52 @@ class AndroidTtsEngine @Inject constructor(
         tts?.setOnUtteranceProgressListener(
             object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    if (utteranceId == activeUtteranceId) {
-                        _playbackState.value = TtsPlaybackState.SPEAKING
-                    }
+                    val (session, chunk) = parseUtteranceId(utteranceId) ?: return
+                    if (session != sessionCounterValue) return
+                    activeChunkIndex = chunk
+                    _playbackState.value = TtsPlaybackState.SPEAKING
                 }
 
                 override fun onDone(utteranceId: String?) {
-                    finish(utteranceId)
+                    val (session, chunk) = parseUtteranceId(utteranceId) ?: return
+                    if (session != sessionCounterValue) return
+                    if (chunk == sessionChunks.lastIndex) {
+                        // The last chunk finished naturally: the whole text
+                        // has been spoken.
+                        clearSession(TtsPlaybackState.IDLE)
+                    }
+                    // Non-final chunks: the queued next chunk's onStart takes
+                    // over; no state change here.
                 }
 
                 override fun onError(utteranceId: String?) {
-                    finish(utteranceId)
+                    fail(utteranceId)
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
-                    finish(utteranceId)
+                    fail(utteranceId)
                 }
 
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                    finish(utteranceId)
+                    val (session, chunk) = parseUtteranceId(utteranceId) ?: return
+                    if (session != sessionCounterValue) return
+                    if (_playbackState.value == TtsPlaybackState.PAUSED) {
+                        // pause() stopped us on purpose; the pause point is
+                        // already recorded — keep PAUSED untouched.
+                        return
+                    }
+                    if (chunk == activeChunkIndex) {
+                        clearSession(TtsPlaybackState.IDLE)
+                    }
                 }
 
-                private fun finish(utteranceId: String?) {
-                    if (utteranceId == activeUtteranceId) {
-                        activeUtteranceId = null
-                        _playbackState.value = TtsPlaybackState.IDLE
+                private fun fail(utteranceId: String?) {
+                    val (session, chunk) = parseUtteranceId(utteranceId) ?: return
+                    if (session != sessionCounterValue) return
+                    if (chunk == activeChunkIndex ||
+                        _playbackState.value != TtsPlaybackState.PAUSED
+                    ) {
+                        clearSession(TtsPlaybackState.IDLE)
                     }
                 }
             }
@@ -81,41 +117,81 @@ class AndroidTtsEngine @Inject constructor(
         // very long one would be rejected or truncated by many engines.
         val chunks = TtsTextChunker.chunk(text)
         if (chunks.isEmpty()) return
+        sessionChunks = chunks
+        sessionLanguage = language
         tts?.language = Locale.forLanguageTag(language)
-        chunks.forEachIndexed { index, chunk ->
-            val utteranceId = utteranceSequence.incrementAndGet().toString()
-            val queueMode = if (index == 0) {
-                TextToSpeech.QUEUE_FLUSH
-            } else {
-                TextToSpeech.QUEUE_ADD
-            }
-            val result = tts?.speak(chunk, queueMode, null, utteranceId)
-            if (result == TextToSpeech.SUCCESS) {
-                // The last queued chunk drives the speaking→idle transition.
-                activeUtteranceId = utteranceId
-            } else {
-                // A partial queue must never keep playing half the text.
-                activeUtteranceId = null
-                _playbackState.value = TtsPlaybackState.IDLE
-                tts?.stop()
-                return
-            }
+        sessionCounterValue = sessionCounter.incrementAndGet()
+        playFrom(0)
+    }
+
+    override fun pause() {
+        if (_playbackState.value != TtsPlaybackState.SPEAKING) return
+        // Record PAUSED first so the engine's onStop callback knows the stop
+        // was intentional and leaves the session intact for resume().
+        _playbackState.value = TtsPlaybackState.PAUSED
+        tts?.stop()
+    }
+
+    override fun resume() {
+        if (_playbackState.value != TtsPlaybackState.PAUSED) return
+        val index = activeChunkIndex
+        if (index !in sessionChunks.indices) {
+            clearSession(TtsPlaybackState.IDLE)
+            return
         }
-        _playbackState.value = TtsPlaybackState.SPEAKING
+        playFrom(index)
     }
 
     override fun stop() {
-        activeUtteranceId = null
-        _playbackState.value = TtsPlaybackState.IDLE
+        clearSession(TtsPlaybackState.IDLE)
         tts?.stop()
     }
 
     override fun shutdown() {
-        activeUtteranceId = null
-        _playbackState.value = TtsPlaybackState.IDLE
+        clearSession(TtsPlaybackState.IDLE)
         _isReady.value = false
         tts?.stop()
         tts?.shutdown()
         tts = null
+    }
+
+    /** Queues [sessionChunks] starting at [from]; index 0 flushes the queue. */
+    private fun playFrom(from: Int) {
+        activeChunkIndex = from
+        sessionChunks.forEachIndexed { index, chunk ->
+            if (index < from) return@forEachIndexed
+            val queueMode = if (index == from) {
+                TextToSpeech.QUEUE_FLUSH
+            } else {
+                TextToSpeech.QUEUE_ADD
+            }
+            val result = tts?.speak(chunk, queueMode, null, utteranceId(index))
+            if (result != TextToSpeech.SUCCESS) {
+                // A partial queue must never keep playing half the text.
+                clearSession(TtsPlaybackState.IDLE)
+                tts?.stop()
+                return
+            }
+        }
+        // Optimistically SPEAKING; onStart confirms (or a queue failure above
+        // has already settled IDLE).
+        _playbackState.value = TtsPlaybackState.SPEAKING
+    }
+
+    private fun utteranceId(chunkIndex: Int): String =
+        "$sessionCounterValue:$chunkIndex"
+
+    private fun parseUtteranceId(utteranceId: String?): Pair<Int, Int>? {
+        val parts = utteranceId?.split(":") ?: return null
+        val session = parts.getOrNull(0)?.toIntOrNull() ?: return null
+        val chunk = parts.getOrNull(1)?.toIntOrNull() ?: return null
+        return session to chunk
+    }
+
+    private fun clearSession(state: TtsPlaybackState) {
+        sessionChunks = emptyList()
+        sessionCounterValue = -1
+        activeChunkIndex = -1
+        _playbackState.value = state
     }
 }

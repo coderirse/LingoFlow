@@ -15,6 +15,7 @@ import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.TranslationResult
 import com.lingoflow.app.domain.model.TranslationStatus
+import com.lingoflow.app.domain.model.translation.TranslationErrors
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -50,7 +51,7 @@ class MlKitTranslator @Inject constructor() : Translator {
         targetLanguage: Language
     ): Result<TranslationResult> {
         if (text.isBlank()) {
-            return Result.failure(TranslationException("Nothing to translate."))
+            return Result.failure(TranslationException(TranslationErrors.NOTHING_TO_TRANSLATE))
         }
         return try {
             val resolvedSource = resolveSourceLanguage(text, sourceLanguage)
@@ -94,13 +95,11 @@ class MlKitTranslator @Inject constructor() : Translator {
             // The on-device language-id module failed (e.g. not yet
             // downloaded and no network). Guide the user instead of
             // surfacing a raw ML Kit error.
-            throw TranslationException(
-                "Language detection is unavailable. Please select the source language manually."
-            )
+            throw TranslationException(TranslationErrors.LANGUAGE_DETECT_UNAVAILABLE)
         }
         if (tag != UNDETERMINED_LANGUAGE_TAG) {
             return Language.fromCode(tag)
-                ?: throw TranslationException("Detected language is not supported yet.")
+                ?: throw TranslationException(TranslationErrors.LANGUAGE_UNSUPPORTED)
         }
 
         // identifyLanguage() gives up on short or ambiguous text ("und");
@@ -114,9 +113,7 @@ class MlKitTranslator @Inject constructor() : Translator {
         }
         val best = candidates.maxByOrNull { it.confidence }?.languageTag
         return best?.let(Language::fromCode)
-            ?: throw TranslationException(
-                "Couldn't detect the language. Please select it manually."
-            )
+            ?: throw TranslationException(TranslationErrors.LANGUAGE_UNDETECTED)
     }
 
     private fun getOrCreateClient(
@@ -157,13 +154,13 @@ class MlKitTranslator @Inject constructor() : Translator {
         is TranslationException -> this
         is MlKitException -> when (errorCode) {
             MlKitException.UNAVAILABLE, MlKitException.NETWORK_ISSUE ->
-                TranslationException("Translation model is unavailable. Check your network connection.")
+                TranslationException(TranslationErrors.MODEL_UNAVAILABLE, this)
             MlKitException.NOT_ENOUGH_SPACE ->
-                TranslationException("Not enough storage to download the translation model.")
+                TranslationException(TranslationErrors.NOT_ENOUGH_SPACE, this)
             else ->
-                TranslationException("Translation failed. Please try again.", this)
+                TranslationException(TranslationErrors.GENERIC, this)
         }
-        else -> TranslationException("Translation failed. Please try again.", this)
+        else -> TranslationException(TranslationErrors.GENERIC, this)
     }
 
     private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->

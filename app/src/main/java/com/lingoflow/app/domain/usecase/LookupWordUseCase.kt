@@ -2,6 +2,7 @@ package com.lingoflow.app.domain.usecase
 
 import com.lingoflow.app.domain.model.TranslationException
 import com.lingoflow.app.domain.model.dictionary.PosMeaning
+import com.lingoflow.app.domain.model.translation.TranslationErrors
 import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.model.llm.ChatRequest
 import com.lingoflow.app.domain.model.llm.LlmProvider
@@ -39,14 +40,14 @@ open class LookupWordUseCase(
     open suspend operator fun invoke(word: String): Result<WordLookupInfo> {
         val key = word.trim().lowercase()
         if (key.isEmpty()) {
-            return Result.failure(TranslationException("Nothing to look up."))
+            return Result.failure(TranslationException(TranslationErrors.NOTHING_TO_TRANSLATE))
         }
         synchronized(cache) {
             cache[key]?.let { return Result.success(it) }
         }
 
         val config = resolveProviderConfig()
-            ?: return Result.failure(TranslationException("LLM API key is not configured."))
+            ?: return Result.failure(TranslationException(TranslationErrors.LLM_KEY_MISSING))
 
         return try {
             val provider = providerFactory(config)
@@ -81,7 +82,7 @@ open class LookupWordUseCase(
      */
     open fun lookupStream(word: String): Flow<WordLookupInfo> = flow {
         val key = word.trim().lowercase()
-        if (key.isEmpty()) throw TranslationException("Nothing to look up.")
+        if (key.isEmpty()) throw TranslationException(TranslationErrors.NOTHING_TO_TRANSLATE)
         val cached = synchronized(cache) { cache[key] }
         if (cached != null) {
             emit(cached)
@@ -89,7 +90,7 @@ open class LookupWordUseCase(
         }
 
         val config = resolveProviderConfig()
-            ?: throw TranslationException("LLM API key is not configured.")
+            ?: throw TranslationException(TranslationErrors.LLM_KEY_MISSING)
 
         val provider = providerFactory(config)
         val stream = provider.chatStream(
@@ -115,7 +116,7 @@ open class LookupWordUseCase(
             }
         }
         val final = parseStreamText(key, accumulated.toString(), complete = true)
-            ?: throw TranslationException("LLM returned no usable dictionary info.")
+            ?: throw TranslationException(TranslationErrors.LLM_GENERIC)
         synchronized(cache) { cache[key] = final }
         if (final != lastEmitted) emit(final)
     }

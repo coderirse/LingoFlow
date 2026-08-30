@@ -9,7 +9,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lingoflow.app.domain.model.settings.AppLanguage
 import com.lingoflow.app.domain.model.settings.InterfaceStyle
@@ -30,10 +32,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Keep the system splash on screen until the persisted theme/language
+        // has been read, so Editorial/Chinese users never see an
+        // English/system-theme frame flash before the real UI.
+        val splashScreen = installSplashScreen()
+        val settingsLoaded = mutableStateOf(false)
+        splashScreen.setKeepOnScreenCondition { !settingsLoaded.value }
         enableEdgeToEdge()
         setContent {
             val settings by settingsRepository.observeSettings()
                 .collectAsStateWithLifecycle(initialValue = null)
+            settingsLoaded.value = settings != null
 
             val themeMode = settings?.themeMode ?: ThemeMode.SYSTEM
             val interfaceStyle = settings?.interfaceStyle ?: InterfaceStyle.MODERN

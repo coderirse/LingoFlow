@@ -13,6 +13,7 @@ import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.dictionary.WordLookupInfo
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationNotices
+import com.lingoflow.app.domain.model.translation.TranslationErrors
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.model.ttsTag
@@ -39,6 +40,7 @@ data class HomeUiState(
     val translationResponse: TranslationResponse? = null,
     val isTranslating: Boolean = false,
     val status: TranslationStatus = TranslationStatus.IDLE,
+    /** Stable error key from [TranslationErrors]; the UI localizes it. */
     val errorMessage: String? = null,
     val snackbarMessage: String? = null,
     /** Word tapped in the translation result; triggers dictionary lookup. */
@@ -201,6 +203,7 @@ class HomeViewModel @Inject constructor(
 
     private var streamJob: kotlinx.coroutines.Job? = null
     private var oneShotJob: kotlinx.coroutines.Job? = null
+    private var wordLookupJob: kotlinx.coroutines.Job? = null
 
     private fun translatedTextOf(response: TranslationResponse): String =
         when (response) {
@@ -209,6 +212,9 @@ class HomeViewModel @Inject constructor(
         }
 
     private fun startOneShotTranslation(snapshot: HomeUiState) {
+        // Rapid re-taps (or a mode switch mid-flight) must not leave two
+        // one-shot translations racing over the shared status flow.
+        oneShotJob?.cancel()
         oneShotJob = viewModelScope.launch {
             _uiState.update { it.copy(isTranslating = true, errorMessage = null) }
             try {
@@ -227,8 +233,8 @@ class HomeViewModel @Inject constructor(
                         it.copy(
                             isTranslating = false,
                             translationResponse = null,
-                            errorMessage = (error as? TranslationException)?.userMessage
-                                ?: "Translation failed. Please try again."
+                            errorMessage = (error as? TranslationException)?.code
+                                ?: TranslationErrors.GENERIC
                         )
                     }
                 }
@@ -308,8 +314,8 @@ class HomeViewModel @Inject constructor(
                             isTranslating = false,
                             isStreaming = false,
                             streamingText = "",
-                            errorMessage = (e as? TranslationException)?.userMessage
-                                ?: "Translation failed. Please try again."
+                            errorMessage = (e as? TranslationException)?.code
+                                ?: TranslationErrors.GENERIC
                         )
                     }
                 } else {
@@ -373,7 +379,10 @@ class HomeViewModel @Inject constructor(
             word.matches(SINGLE_ENGLISH_WORD)
         if (!eligible) return
 
-        viewModelScope.launch {
+        // Tracked so clearing the result cancels a still-running lookup —
+        // otherwise a slow LLM answer could land under the next translation.
+        wordLookupJob?.cancel()
+        wordLookupJob = viewModelScope.launch {
             _uiState.update { it.copy(wordLookupLoading = true) }
             // Hard cap: a hung LLM call must never leave the loading cursor
             // on screen forever. Timeout settles silently, same as failure.
@@ -390,18 +399,24 @@ class HomeViewModel @Inject constructor(
 
     fun onClearInput() {
         ttsEngine.stop()
+        wordLookupJob?.cancel()
         _uiState.update {
             it.copy(
                 inputText = "",
                 translationResponse = null,
                 errorMessage = null,
                 currentHistoryId = null,
-                isCurrentFavorite = false
+                isCurrentFavorite = false,
+                wordLookup = null,
+                wordLookupLoading = false
             )
         }
     }
 
-    /** Speaks the current translation in the target language. */
+    /**
+     * Play / pause / resume for the current translation. The platform TTS
+     * has no pause API; the engine emulates it at sentence granularity.
+     */
     fun onSpeakClick() {
         val state = _uiState.value
         val text = state.translatedText
@@ -410,7 +425,8 @@ class HomeViewModel @Inject constructor(
             TtsPlaybackState.IDLE ->
                 ttsEngine.speak(text, state.targetLanguage.ttsTag ?: "en-US")
 
-            TtsPlaybackState.SPEAKING -> ttsEngine.stop()
+            TtsPlaybackState.SPEAKING -> ttsEngine.pause()
+            TtsPlaybackState.PAUSED -> ttsEngine.resume()
         }
     }
 
@@ -428,8 +444,31 @@ class HomeViewModel @Inject constructor(
 
     fun onClearResult() {
         ttsEngine.stop()
+        wordLookupJob?.cancel()
         _uiState.update {
             it.copy(
+                translationResponse = null,
+                errorMessage = null,
+                currentHistoryId = null,
+                isCurrentFavorite = false,
+                wordLookup = null,
+                wordLookupLoading = false
+            )
+        }
+    }
+
+    /**
+     * Reuses a history record: restores the source text together with the
+     * language pair and mode it was translated with, not just the text.
+     */
+    fun onReuseHistoryItem(item: TranslationHistoryItem) {
+        ttsEngine.stop()
+        _uiState.update {
+            it.copy(
+                inputText = item.sourceText,
+                sourceLanguage = item.sourceLanguage,
+                targetLanguage = item.targetLanguage,
+                translationMode = item.mode,
                 translationResponse = null,
                 errorMessage = null,
                 currentHistoryId = null,

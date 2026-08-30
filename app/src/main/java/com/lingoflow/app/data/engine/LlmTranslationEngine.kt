@@ -12,6 +12,7 @@ import com.lingoflow.app.domain.model.llm.LlmProvider
 import com.lingoflow.app.domain.model.llm.Message
 import com.lingoflow.app.domain.model.settings.ProviderConfig
 import com.lingoflow.app.domain.model.translation.TranslationMode
+import com.lingoflow.app.domain.model.translation.TranslationErrors
 import com.lingoflow.app.domain.model.translation.TranslationRequest
 import com.lingoflow.app.domain.model.translation.TranslationResponse
 import com.lingoflow.app.domain.repository.SettingsRepository
@@ -46,7 +47,7 @@ class LlmTranslationEngine(
         request: TranslationRequest
     ): Result<TranslationResponse> {
         val config = activeProviderConfig()
-            ?: return Result.failure(TranslationException("LLM API key is not configured."))
+            ?: return Result.failure(TranslationException(TranslationErrors.LLM_KEY_MISSING))
 
         val provider = providerFactory(config)
         val chatRequest = buildChatRequest(request, config)
@@ -57,7 +58,7 @@ class LlmTranslationEngine(
             if (response.finishReason == "length") {
                 // A truncated "success" must never be presented as a
                 // complete translation (it would also land in history).
-                return Result.failure(TranslationException(TRUNCATED_MESSAGE))
+                return Result.failure(TranslationException(TranslationErrors.TRUNCATED))
             }
             Result.success(buildResponse(request.mode, response.content))
         } catch (e: CancellationException) {
@@ -74,7 +75,7 @@ class LlmTranslationEngine(
             "Only NATURAL/CONCISE/FORMAL and long STANDARD modes support streaming"
         }
         val config = activeProviderConfig()
-            ?: throw TranslationException("LLM API key is not configured.")
+            ?: throw TranslationException(TranslationErrors.LLM_KEY_MISSING)
 
         val provider = providerFactory(config)
         try {
@@ -211,21 +212,16 @@ class LlmTranslationEngine(
 
     private fun Exception.toUserFriendlyError(): Exception = when (this) {
         is TranslationException -> this
-        is LlmException.InvalidApiKey ->
-            TranslationException("LLM API key is invalid. Please check your Settings.")
-        is LlmException.RateLimited ->
-            TranslationException("LLM rate limit reached. Please try again later.")
-        is LlmException.Network ->
-            TranslationException("Network error. Please check your connection.")
-        is LlmException.Truncated -> TranslationException(TRUNCATED_MESSAGE)
-        else -> TranslationException("Translation failed. Please try again.", this)
+        is LlmException.InvalidApiKey -> TranslationException(TranslationErrors.LLM_KEY_INVALID, this)
+        is LlmException.RateLimited -> TranslationException(TranslationErrors.LLM_RATE_LIMITED, this)
+        is LlmException.Network -> TranslationException(TranslationErrors.LLM_NETWORK, this)
+        is LlmException.InvalidBaseUrl -> TranslationException(TranslationErrors.INVALID_BASE_URL, this)
+        is LlmException.HttpError -> TranslationException(TranslationErrors.LLM_SERVER, this)
+        is LlmException.Truncated -> TranslationException(TranslationErrors.TRUNCATED, this)
+        else -> TranslationException(TranslationErrors.GENERIC, this)
     }
 
     private companion object {
-        const val TRUNCATED_MESSAGE =
-            "The translation was cut off by the model's output limit. " +
-                "Try a shorter text."
-
         const val LONG_STANDARD_MAX_TOKENS = 8192
 
         val STREAMABLE_MODES = setOf(

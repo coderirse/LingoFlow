@@ -16,15 +16,23 @@ import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.repository.SettingsRepository
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 /**
  * Split-storage [SettingsRepository]: non-sensitive fields (active provider,
  * default mode, per-provider baseUrl/model/temperature, theme, language)
  * live in DataStore Preferences, while all API keys live in
  * EncryptedSharedPreferences.
+ *
+ * ESP decryption is expensive (~ms per key) and [EncryptedSharedPreferences]
+ * is not safe to touch from the main thread, so key reads are cached in
+ * memory and every settings read is confined to [Dispatchers.IO]
+ * ([observeSettings] via [flowOn], [getSettings] via [withContext]).
  */
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
@@ -32,11 +40,16 @@ class SettingsRepositoryImpl @Inject constructor(
     private val encryptedPrefs: SharedPreferences
 ) : SettingsRepository {
 
-    override suspend fun getSettings(): AppSettings =
+    /** Decrypted API keys; populated on first IO read, refreshed on save. */
+    @Volatile
+    private var keysCache: Map<String, String>? = null
+
+    override suspend fun getSettings(): AppSettings = withContext(Dispatchers.IO) {
         buildSettings(dataStore.data.first())
+    }
 
     override fun observeSettings(): Flow<AppSettings> =
-        dataStore.data.map(::buildSettings)
+        dataStore.data.map(::buildSettings).flowOn(Dispatchers.IO)
 
     private fun buildSettings(prefs: Preferences): AppSettings {
         val activeProviderId = prefs[KEY_ACTIVE_PROVIDER]
@@ -59,10 +72,11 @@ class SettingsRepositoryImpl @Inject constructor(
             ?.let { runCatching { InterfaceStyle.valueOf(it) }.getOrNull() }
             ?: InterfaceStyle.MODERN
 
+        val keys = readApiKeys()
         val providers = LlmProviderId.entries.associateWith { id ->
             ProviderConfig(
                 providerId = id,
-                apiKey = encryptedPrefs.getString(apiKeyKey(id), "") ?: "",
+                apiKey = keys[apiKeyKey(id)].orEmpty(),
                 baseUrl = prefs[stringPreferencesKey(baseUrlKey(id))]?.ifBlank { null },
                 model = prefs[stringPreferencesKey(modelKey(id))]?.ifBlank { null }
                     ?: id.defaultModel,
@@ -73,12 +87,30 @@ class SettingsRepositoryImpl @Inject constructor(
         return AppSettings(
             activeLlmProviderId = activeProviderId,
             llmProviders = providers,
-            dictionaryApiKey = encryptedPrefs.getString(KEY_DICTIONARY_API_KEY, "") ?: "",
+            dictionaryApiKey = keys[KEY_DICTIONARY_API_KEY].orEmpty(),
             defaultTranslationMode = defaultMode,
             themeMode = themeMode,
             appLanguage = appLanguage,
             interfaceStyle = interfaceStyle
         )
+    }
+
+    /**
+     * Reads every API key once per cache generation. Individual keys that
+     * fail to decrypt (corrupted entry, Keystore hiccup) come back empty —
+     * the user re-enters them; the app must never crash over a secret.
+     */
+    private fun readApiKeys(): Map<String, String> {
+        keysCache?.let { return it }
+        val keys = LlmProviderId.entries.associate { id ->
+            apiKeyKey(id) to runCatching {
+                encryptedPrefs.getString(apiKeyKey(id), "").orEmpty()
+            }.getOrDefault("")
+        } + (KEY_DICTIONARY_API_KEY to runCatching {
+            encryptedPrefs.getString(KEY_DICTIONARY_API_KEY, "").orEmpty()
+        }.getOrDefault(""))
+        keysCache = keys
+        return keys
     }
 
     override suspend fun saveSettings(settings: AppSettings) {
@@ -94,14 +126,30 @@ class SettingsRepositoryImpl @Inject constructor(
                 prefs[floatPreferencesKey(temperatureKey(id))] = config.temperature
             }
         }
-        encryptedPrefs.edit().apply {
-            settings.llmProviders.forEach { (id, config) ->
-                putString(apiKeyKey(id), config.apiKey)
+        withContext(Dispatchers.IO) {
+            val writeOk = runCatching {
+                encryptedPrefs.edit().apply {
+                    settings.llmProviders.forEach { (id, config) ->
+                        putString(apiKeyKey(id), config.apiKey)
+                    }
+                    putString(KEY_DICTIONARY_API_KEY, settings.dictionaryApiKey)
+                    apply()
+                }
+            }.isSuccess
+            // Refresh the cache from what was written; drop it entirely on
+            // failure so the next read reloads from disk.
+            keysCache = if (writeOk) {
+                LlmProviderId.entries.associate { id ->
+                    apiKeyKey(id) to configApiKey(settings, id)
+                } + (KEY_DICTIONARY_API_KEY to settings.dictionaryApiKey)
+            } else {
+                null
             }
-            putString(KEY_DICTIONARY_API_KEY, settings.dictionaryApiKey)
-            apply()
         }
     }
+
+    private fun configApiKey(settings: AppSettings, id: LlmProviderId): String =
+        settings.llmProviders[id]?.apiKey.orEmpty()
 
     private companion object {
         val KEY_ACTIVE_PROVIDER = stringPreferencesKey("active_llm_provider")

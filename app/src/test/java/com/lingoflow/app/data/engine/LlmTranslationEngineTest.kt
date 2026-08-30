@@ -120,8 +120,9 @@ class LlmTranslationEngineTest {
         val result = engine.translate(request(TranslationMode.STANDARD))
 
         assertTrue(result.isFailure)
-        assertTrue(
-            result.exceptionOrNull()!!.message!!.contains("cut off")
+        assertEquals(
+            com.lingoflow.app.domain.model.translation.TranslationErrors.TRUNCATED,
+            (result.exceptionOrNull() as com.lingoflow.app.domain.model.TranslationException).code
         )
     }
 
@@ -217,7 +218,10 @@ class LlmTranslationEngineStreamTest {
             engine.translateStream(request(TranslationMode.NATURAL)).toList()
             fail("Expected TranslationException")
         } catch (e: TranslationException) {
-            assertEquals("LLM API key is not configured.", e.userMessage)
+            assertEquals(
+                com.lingoflow.app.domain.model.translation.TranslationErrors.LLM_KEY_MISSING,
+                e.code
+            )
         }
     }
 

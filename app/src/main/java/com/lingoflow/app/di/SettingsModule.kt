@@ -42,13 +42,30 @@ abstract class SettingsModule {
             @ApplicationContext context: Context
         ): SharedPreferences {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            return EncryptedSharedPreferences.create(
-                "lingoflow_secrets",
-                masterKeyAlias,
-                context,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+            return try {
+                createSecretsPrefs(context, masterKeyAlias)
+            } catch (e: Exception) {
+                // The secrets file is unrecoverable when the Keystore master
+                // key is gone (e.g. ciphertext restored from another device
+                // via backup, or a corrupted pref entry) and would otherwise
+                // throw on every launch. Keys are re-enterable; a crash loop
+                // is not. Reset the file and start fresh.
+                context.deleteSharedPreferences(SECRETS_FILE_NAME)
+                createSecretsPrefs(context, masterKeyAlias)
+            }
         }
+
+        private fun createSecretsPrefs(
+            context: Context,
+            masterKeyAlias: String
+        ): SharedPreferences = EncryptedSharedPreferences.create(
+            SECRETS_FILE_NAME,
+            masterKeyAlias,
+            context,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+
+        private const val SECRETS_FILE_NAME = "lingoflow_secrets"
     }
 }

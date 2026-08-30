@@ -98,7 +98,20 @@ fun WordPreviewSheet(
                 }
 
                 is DictionaryUiState.Success -> {
-                    val entry = state.entries.first()
+                    // Parser guarantees non-empty, but a future parser change
+                    // must degrade to the error branch, not crash here.
+                    val entry = state.entries.firstOrNull() ?: run {
+                        WordPreviewError(
+                            error = DictionaryException.ParseError(
+                                IllegalStateException("Empty entry list")
+                            ),
+                            word = word,
+                            ttsReady = ttsReady,
+                            onSpeak = { viewModel.speak(word) },
+                            onGoToSettings = onGoToSettings
+                        )
+                        return@Column
+                    }
                     WordPreviewContent(
                         word = entry.word,
                         entry = entry,

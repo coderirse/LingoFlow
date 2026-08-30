@@ -29,3 +29,6 @@ Thumbs.db
 # Local design assets (icon source, device screenshots)
 image.jpg
 screenshot/
+
+# Local test builds
+/*.apk

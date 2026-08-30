@@ -23,6 +23,18 @@ class FakeTtsEngine(
         _playbackState.value = TtsPlaybackState.SPEAKING
     }
 
+    override fun pause() {
+        if (_playbackState.value == TtsPlaybackState.SPEAKING) {
+            _playbackState.value = TtsPlaybackState.PAUSED
+        }
+    }
+
+    override fun resume() {
+        if (_playbackState.value == TtsPlaybackState.PAUSED) {
+            _playbackState.value = TtsPlaybackState.SPEAKING
+        }
+    }
+
     override fun stop() {
         _playbackState.value = TtsPlaybackState.IDLE
     }

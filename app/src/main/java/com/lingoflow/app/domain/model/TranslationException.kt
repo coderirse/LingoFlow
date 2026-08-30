@@ -1,10 +1,13 @@
 package com.lingoflow.app.domain.model
 
+import com.lingoflow.app.domain.model.translation.TranslationErrors
+
 /**
- * Translation failure carrying a user-facing [userMessage].
- * Engine-specific exception details never leak past the data layer.
+ * Translation failure carrying a stable [code] from [TranslationErrors].
+ * Only the UI layer turns codes into localized text; engine-specific
+ * exception details never leak past the data layer.
  */
 class TranslationException(
-    val userMessage: String,
+    val code: String = TranslationErrors.GENERIC,
     cause: Throwable? = null
-) : Exception(userMessage, cause)
+) : Exception(code, cause)

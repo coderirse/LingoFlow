@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +68,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,19 +77,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -98,6 +110,7 @@ import com.lingoflow.app.R
 import com.lingoflow.app.data.tts.TtsPlaybackState
 import com.lingoflow.app.domain.model.Language
 import com.lingoflow.app.domain.model.TranslationStatus
+import com.lingoflow.app.domain.model.history.TranslationHistoryItem
 import com.lingoflow.app.domain.model.translation.TranslationMode
 import com.lingoflow.app.domain.model.translation.TranslationNotices
 import com.lingoflow.app.domain.model.translation.TranslationResponse
@@ -136,6 +149,7 @@ fun HomeRoute(
         onToggleFavoriteTranslation = viewModel::onToggleFavoriteTranslation,
         onCancelStreaming = viewModel::onCancelStreaming,
         onCancelTranslation = viewModel::onCancelTranslation,
+        onReuseHistoryItem = viewModel::onReuseHistoryItem,
         onSettingsClick = onNavigateToSettings
     )
 }
@@ -157,6 +171,7 @@ fun HomeScreen(
     onToggleFavoriteTranslation: () -> Unit,
     onCancelStreaming: () -> Unit,
     onCancelTranslation: () -> Unit,
+    onReuseHistoryItem: (TranslationHistoryItem) -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -245,7 +260,9 @@ fun HomeScreen(
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, uiState.translatedText)
                     }
-                    context.startActivity(Intent.createChooser(sendIntent, null))
+                    runCatching {
+                        context.startActivity(Intent.createChooser(sendIntent, null))
+                    }
                 },
                 onPaste = {
                     coroutineScope.launch {
@@ -271,8 +288,8 @@ fun HomeScreen(
             )
 
             1 -> HistoryRoute(
-                onReuse = { text ->
-                    onInputChange(text)
+                onReuse = { item ->
+                    onReuseHistoryItem(item)
                     selectedTab = 0
                 },
                 modifier = Modifier.padding(innerPadding)
@@ -347,21 +364,27 @@ private fun HomeTab(
                 overflow = TextOverflow.Ellipsis
             )
         }
+        // Indicator fades/slides in for the selected tab instead of
+        // popping in and out.
+        val indicatorAlpha by animateFloatAsState(
+            targetValue = if (selected) 1f else 0f,
+            animationSpec = tween(durationMillis = 200),
+            label = "tabIndicatorAlpha"
+        )
         Box(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
                 .fillMaxWidth()
                 .height(3.dp)
         ) {
-            if (selected) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    shape = RoundedCornerShape(2.dp),
-                    color = MaterialTheme.colorScheme.primary
-                ) {}
-            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .alpha(indicatorAlpha),
+                shape = RoundedCornerShape(2.dp),
+                color = MaterialTheme.colorScheme.primary
+            ) {}
         }
     }
 }
@@ -538,23 +561,12 @@ private fun InputCard(
                 TextButton(onClick = onPaste) {
                     Text(strings.paste, color = MaterialTheme.colorScheme.primary)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (inputText.isNotEmpty()) {
-                        IconButton(onClick = onClearInput) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = strings.clearInput,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    // Voice input arrives in a later phase.
-                    IconButton(onClick = {}, enabled = false) {
+                if (inputText.isNotEmpty()) {
+                    IconButton(onClick = onClearInput) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_mic),
-                            contentDescription = strings.voiceInput,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp)
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = strings.clearInput,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -609,17 +621,19 @@ private fun ModeSelector(
     selected: TranslationMode,
     onModeChange: (TranslationMode) -> Unit
 ) {
-    // All five modes fit on one row — no horizontal scrolling.
+    // Horizontally scrollable chip row: labels never truncate on narrow
+    // screens, and new modes can be added without squeezing the row.
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         TranslationMode.entries.forEach { mode ->
             ModeCard(
                 mode = mode,
                 isSelected = mode == selected,
-                onClick = { onModeChange(mode) },
-                modifier = Modifier.weight(1f)
+                onClick = { onModeChange(mode) }
             )
         }
     }
@@ -645,12 +659,16 @@ private fun ModeCard(
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
         ) {
             Text(
                 text = mode.displayName,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -706,13 +724,7 @@ private fun TranslateButton(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    when {
-                        cancellable -> Modifier.background(MaterialTheme.colorScheme.error)
-                        enabled -> Modifier.background(gradient)
-                        else -> Modifier
-                    }
-                ),
+                .then(if (enabled) Modifier.background(gradient) else Modifier),
             contentAlignment = Alignment.Center
         ) {
             when {
@@ -826,7 +838,7 @@ private fun TranslationResultCard(
                             tint = MaterialTheme.colorScheme.error
                         )
                         Text(
-                            text = uiState.errorMessage,
+                            text = strings.localizedError(uiState.errorMessage),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -1021,7 +1033,13 @@ private fun TranslationResultCard(
 // Dictionary shortcut + branding
 // ---------------------------------------------------------------------------
 
-/** Renders [text] as individually tappable words for dictionary lookup. */@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Renders [text] with individually tappable words for dictionary lookup, as
+ * ONE [Text] instead of one composable per word: long translations stay a
+ * single layout node (hundreds of word nodes used to slow composition and
+ * break text selection), paragraph gaps come from the real newline
+ * characters, and TalkBack reads the text naturally.
+ */
 @Composable
 private fun ClickableWords(
     text: String,
@@ -1030,66 +1048,129 @@ private fun ClickableWords(
 ) {
     // Last tapped word stays highlighted (underline + brand color) as feedback.
     var tappedWord by remember(text) { mutableStateOf<String?>(null) }
-    val density = LocalDensity.current
-    // One line of body text: the height a blank source line should occupy
-    // so paragraph gaps read the same as in the non-clickable rendering.
-    val paragraphGap = with(density) { 27.sp.toDp() }
+    val highlightColor = MaterialTheme.colorScheme.primary
 
-    // Line-aware layout via [WordLineSplitter]: the word split itself is
-    // whitespace-based, so paragraph breaks must be handled BEFORE
-    // splitting — each line becomes its own word-flow row and blank lines
-    // become real vertical gaps. Without this, the organized layout of a
-    // long translation collapses back into one solid block the moment
-    // streaming finishes.
-    Column(modifier = modifier.fillMaxWidth()) {
-        WordLineSplitter.lines(text).forEach { line ->
-            if (line.isEmpty()) {
-                Spacer(modifier = Modifier.height(paragraphGap))
-            } else {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start)
-                ) {
-                    line.split(Regex("\\s+")).filter { it.isNotEmpty() }
-                        .forEach { rawWord ->
-                            val cleanWord =
-                                rawWord.trim { !it.isLetterOrDigit() }.lowercase()
-                            val isTapped = cleanWord.isNotEmpty() && cleanWord == tappedWord
-                            Text(
-                                text = rawWord,
-                                modifier = Modifier.clickable(enabled = cleanWord.isNotEmpty()) {
-                                    tappedWord = cleanWord
-                                    onWordClick(cleanWord)
-                                },
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontSize = 18.sp,
-                                    lineHeight = 27.sp,
-                                    textDecoration = if (isTapped) TextDecoration.Underline else null
-                                ),
-                                color = if (isTapped) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                }
-                            )
-                        }
+    // Word ranges in annotated-string coordinates, resolved at tap time.
+    val (annotated, wordRanges) = remember(text, tappedWord, highlightColor) {
+        buildAnnotated(text, tappedWord, highlightColor)
+    }
+    val layoutResult = remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    Text(
+        text = annotated,
+        onTextLayout = { layoutResult.value = it },
+        style = MaterialTheme.typography.bodyLarge.copy(
+            fontSize = 18.sp,
+            lineHeight = 27.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(text) {
+                detectTapGestures { position ->
+                    val layout = layoutResult.value ?: return@detectTapGestures
+                    val offset = layout.getOffsetForPosition(position)
+                    wordRanges.firstOrNull { (range, _) ->
+                        offset >= range.first && offset <= range.last + 1
+                    }?.let { (_, cleanWord) ->
+                        tappedWord = cleanWord
+                        onWordClick(cleanWord)
+                    }
                 }
             }
+    )
+}
+
+/** The word characters considered part of a lookable-up token. */
+private val wordRegex = Regex("[A-Za-z\u00C0-\u024F'-]+")
+
+private data class AnnotatedWords(
+    val annotated: AnnotatedString,
+    val ranges: List<Pair<IntRange, String>>
+)
+
+/**
+ * Builds the annotated string, recording every word's character range and
+ * cleaned form. The tapped word (if any) gets an underline + brand color
+ * span; rebuilding only happens on tap, never per animation frame.
+ */
+private fun buildAnnotated(
+    text: String,
+    tappedWord: String?,
+    highlightColor: Color
+): AnnotatedWords {
+    val ranges = mutableListOf<Pair<IntRange, String>>()
+    val annotated = buildAnnotatedString {
+        var cursor = 0
+        for (match in wordRegex.findAll(text)) {
+            append(text.substring(cursor, match.range.first))
+            val raw = match.value
+            val clean = raw.trim { !it.isLetterOrDigit() }.lowercase()
+            val spanStart = length
+            if (clean.isNotEmpty() && clean == tappedWord) {
+                withStyle(
+                    SpanStyle(
+                        color = highlightColor,
+                        textDecoration = TextDecoration.Underline
+                    )
+                ) {
+                    append(raw)
+                }
+            } else {
+                append(raw)
+            }
+            if (clean.isNotEmpty()) {
+                ranges += IntRange(spanStart, length - 1) to clean
+            }
+            cursor = match.range.last + 1
         }
+        append(text.substring(cursor))
     }
+    return AnnotatedWords(annotated, ranges)
 }
 
 /**
- * Streaming translation text with the typewriter cursor rendered inline as an
- * annotated-string span. Keeping the cursor inside the same [Text] layout
- * guarantees it stays glued to the end of the text — no line jumping or
- * layout shifts while deltas arrive.
+ * Streaming translation text with the typewriter cursor rendered inline via
+ * an [InlineTextContent]. The annotated string is rebuilt only when [text]
+ * changes; the blink animation runs INSIDE the cursor's inline composable,
+ * so no per-frame string rebuilds — that used to cost a full
+ * buildAnnotatedString of the whole accumulated text on every animation
+ * frame, which stalled long streaming translations.
  */
+private const val STREAM_CURSOR_ID = "streamCursor"
+
 @Composable
 private fun StreamingText(
     text: String,
     modifier: Modifier = Modifier
 ) {
+    val display = remember(text) {
+        buildAnnotatedString {
+            append(text)
+            appendInlineContent(STREAM_CURSOR_ID, " ")
+        }
+    }
+    Text(
+        text = display,
+        style = MaterialTheme.typography.bodyLarge.copy(
+            fontSize = 18.sp,
+            lineHeight = 27.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        inlineContent = mapOf(
+            STREAM_CURSOR_ID to InlineTextContent(
+                Placeholder(0.45.em, 1.1.em, PlaceholderVerticalAlign.TextCenter)
+            ) {
+                BlinkingCursorBlock()
+            }
+        ),
+        modifier = modifier.fillMaxWidth()
+    )
+}
+
+/** The pulsing block used as the streaming cursor's inline content. */
+@Composable
+private fun BlinkingCursorBlock() {
     val transition = rememberInfiniteTransition(label = "streamCursor")
     val cursorAlpha by transition.animateFloat(
         initialValue = 1f,
@@ -1100,21 +1181,11 @@ private fun StreamingText(
         ),
         label = "streamCursorAlpha"
     )
-    val cursorColor = MaterialTheme.colorScheme.primary.copy(alpha = cursorAlpha)
-    val display = remember(text, cursorColor) {
-        buildAnnotatedString {
-            append(text)
-            withStyle(SpanStyle(color = cursorColor)) { append("▌") }
-        }
-    }
-    Text(
-        text = display,
-        style = MaterialTheme.typography.bodyLarge.copy(
-            fontSize = 18.sp,
-            lineHeight = 27.sp
-        ),
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = modifier.fillMaxWidth()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .alpha(cursorAlpha)
+            .background(MaterialTheme.colorScheme.primary)
     )
 }
 
@@ -1229,6 +1300,7 @@ private fun HomeScreenPreview() {
             onToggleFavoriteTranslation = {},
             onCancelStreaming = {},
             onCancelTranslation = {},
+            onReuseHistoryItem = {},
             onSettingsClick = {}
         )
     }

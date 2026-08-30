@@ -40,6 +40,9 @@ Grab the latest APK from [Releases](https://github.com/coderirse/LingoFlow/relea
    ```
 3. 执行 `./gradlew :app:assembleRelease`（未配置密钥时自动回退 debug 签名，供 CI/侧载使用）
 
+Release 构建启用 R8 压缩与资源收缩（keep 规则见 `app/proguard-rules.pro`），且只打包
+`arm64-v8a` / `armeabi-v7a` 两种手机 ABI，通用 APK 体积约 33MB。
+
 ## License
 
 [MIT](LICENSE) © 2026 Stafind

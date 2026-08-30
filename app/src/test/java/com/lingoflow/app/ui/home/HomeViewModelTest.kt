@@ -44,7 +44,7 @@ class HomeViewModelTest {
             request: TranslationRequest
         ): Result<TranslationResponse> = Result.failure(
             com.lingoflow.app.domain.model.TranslationException(
-                "Translation failed. Please try again."
+                com.lingoflow.app.domain.model.translation.TranslationErrors.GENERIC
             )
         )
     }
@@ -127,7 +127,10 @@ class HomeViewModelTest {
         val state = viewModel.uiState.value
         assertFalse(state.isTranslating)
         assertNull(state.translationResponse)
-        assertEquals("Translation failed. Please try again.", state.errorMessage)
+        assertEquals(
+            com.lingoflow.app.domain.model.translation.TranslationErrors.GENERIC,
+            state.errorMessage
+        )
     }
 
     @Test
@@ -338,7 +341,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `speak button stops and can start again from the beginning`() = runTest {
+    fun `speak button pauses and resumes without re-speaking`() = runTest {
         val bundle = createViewModel()
         bundle.viewModel.onInputChange("Hello")
         bundle.viewModel.onTranslateClick()
@@ -351,16 +354,23 @@ class HomeViewModelTest {
             bundle.viewModel.uiState.value.ttsPlaybackState
         )
 
+        // Second tap pauses (the platform TTS has no real pause; the engine
+        // emulates it at sentence granularity).
         bundle.viewModel.onSpeakClick()
         advanceUntilIdle()
         assertEquals(
-            TtsPlaybackState.IDLE,
+            TtsPlaybackState.PAUSED,
             bundle.viewModel.uiState.value.ttsPlaybackState
         )
 
+        // Third tap resumes from the held position — the text is spoken once.
         bundle.viewModel.onSpeakClick()
         advanceUntilIdle()
-        assertEquals(listOf("你好", "你好"), bundle.tts.spoken)
+        assertEquals(
+            TtsPlaybackState.SPEAKING,
+            bundle.viewModel.uiState.value.ttsPlaybackState
+        )
+        assertEquals(listOf("你好"), bundle.tts.spoken)
         assertEquals(
             TtsPlaybackState.SPEAKING,
             bundle.viewModel.uiState.value.ttsPlaybackState
@@ -530,7 +540,7 @@ class HomeViewModelTest {
             ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
                 emit("部分")
                 throw com.lingoflow.app.domain.model.TranslationException(
-                    "Network error. Please check your connection."
+                    com.lingoflow.app.domain.model.translation.TranslationErrors.LLM_NETWORK
                 )
             }
         }
@@ -597,14 +607,16 @@ class HomeViewModelTest {
             override suspend fun translate(
                 request: TranslationRequest
             ): Result<TranslationResponse> = Result.failure(
-                com.lingoflow.app.domain.model.TranslationException("boom")
+                com.lingoflow.app.domain.model.TranslationException(
+                    com.lingoflow.app.domain.model.translation.TranslationErrors.LLM_GENERIC
+                )
             )
 
             override fun translateStream(
                 request: TranslationRequest
             ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
                 throw com.lingoflow.app.domain.model.TranslationException(
-                    "Network error. Please check your connection."
+                    com.lingoflow.app.domain.model.translation.TranslationErrors.LLM_NETWORK
                 )
             }
         }
@@ -618,7 +630,10 @@ class HomeViewModelTest {
 
         val state = bundle.viewModel.uiState.value
         assertFalse(state.isStreaming)
-        assertEquals("Network error. Please check your connection.", state.errorMessage)
+        assertEquals(
+            com.lingoflow.app.domain.model.translation.TranslationErrors.LLM_NETWORK,
+            state.errorMessage
+        )
     }
     @Test
     fun `single english word to chinese loads dictionary block`() = runTest {

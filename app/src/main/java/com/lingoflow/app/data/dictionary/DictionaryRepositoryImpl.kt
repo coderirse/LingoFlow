@@ -3,19 +3,15 @@ package com.lingoflow.app.data.dictionary
 import com.lingoflow.app.domain.exception.DictionaryException
 import com.lingoflow.app.domain.model.dictionary.DictionaryEntry
 import com.lingoflow.app.domain.repository.DictionaryRepository
+import com.lingoflow.app.data.common.await
 import com.lingoflow.app.domain.repository.SettingsRepository
 import java.io.IOException
-import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 
 /**
  * Merriam-Webster Collegiate Dictionary client. Reads the API key from
@@ -76,21 +72,6 @@ class DictionaryRepositoryImpl(
 
     // MW uses one endpoint for lookup and search.
     override suspend fun search(word: String): Result<List<DictionaryEntry>> = lookup(word)
-
-    private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
-        continuation.invokeOnCancellation { cancel() }
-        enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
-            }
-
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) {
-                    continuation.resumeWith(Result.failure(e))
-                }
-            }
-        })
-    }
 
     companion object {
         const val DEFAULT_BASE_URL =

@@ -28,6 +28,11 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch { historyRepository.deleteHistory(id) }
     }
 
+    /** Undo for a deletion: re-inserts the record (sorted back into place). */
+    fun restore(item: TranslationHistoryItem) {
+        viewModelScope.launch { historyRepository.addHistory(item) }
+    }
+
     fun clearAll() {
         viewModelScope.launch { historyRepository.clearAllHistory() }
     }

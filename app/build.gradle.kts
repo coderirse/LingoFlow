@@ -8,7 +8,7 @@ plugins {
     kotlin("plugin.serialization") version "2.2.10"
 }
 
-// Release signing only (R8 stays OFF). Passwords come from gitignored
+// Release signing only. Passwords come from gitignored
 // local.properties or environment variables; falls back to debug signing
 // when unconfigured (e.g. CI without secrets).
 val localProperties = Properties().apply {
@@ -34,8 +34,14 @@ android {
         applicationId = "com.lingoflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.3.4"
+        versionCode = 15
+        versionName = "1.4.0"
+
+        // Phone-targeted release APKs: drops the ~34MB of emulator-only
+        // (x86/x86_64) ML Kit native libraries from the universal APK.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -56,13 +62,16 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Shrinks the ~30MB of unshrunk dex (Compose, coroutines,
+            // serialization, icons) down to what the app actually uses.
+            // Keep rules for kotlinx.serialization live in proguard-rules.pro;
+            // OkHttp/ML Kit/Hilt ship their own consumer rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            optimization {
-                enable = false
-            }
         }
     }
     compileOptions {
@@ -85,10 +94,13 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
+    // Extended icon set (History/Visibility etc.); R8 strips unused icons.
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
